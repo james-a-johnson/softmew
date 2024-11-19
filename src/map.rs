@@ -1,7 +1,16 @@
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Range};
 use crate::fault::{Fault, Reason};
 
-const PAGE_SIZE: usize = 4096;
+/// This will control the size of a dirty block
+///
+/// Resetting works on blocks of memory and this controls that block size. Every time a write
+/// happens, the map will keep track of which blocks have been dirtied. Then on a reset every block
+/// will be reset to the original data. A write of any size to a block will dirty it so this
+/// parameter can change the performance of resetting a lot.
+///
+/// A large value for this means that only a few expensive memcopies will need to be made. A
+/// smaller value means a lot more cheap memcopies will be made.
+const PAGE_SIZE: usize = 64;
 
 /// Byte level memory permission
 ///

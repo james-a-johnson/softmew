@@ -1,5 +1,4 @@
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Range};
-use std::collections::BTreeSet;
 use crate::fault::{Fault, Reason};
 
 const PAGE_SIZE: usize = 4096;
@@ -116,7 +115,8 @@ impl BitAndAssign for Perm {
 pub struct Mapping {
     data: Vec<u8>,
     perms: Vec<Perm>,
-    dirty: BTreeSet<usize>,
+    dirty: Vec<usize>,
+    dirty_flag: Vec<u64>,
     pub addr: usize,
 }
 
@@ -126,6 +126,7 @@ impl Mapping {
     /// Default permissions for all of the bytes will be [`Perm::READ`] and [`Perm::WRITE`].
     /// All bytes will be initialized to the value 0.
     #[must_use]
+    #[inline]
     pub fn new(addr: usize, len: usize) -> Self {
         Self::new_perm(addr, len, Perm::default())
     }
@@ -134,16 +135,21 @@ impl Mapping {
     /// `perm`.
     #[must_use]
     pub fn new_perm(addr: usize, len: usize, perm: Perm) -> Self {
+        let dirty_len = (len / PAGE_SIZE) + 1;
+        let dirty_flag_len = (len / PAGE_SIZE / 64) + 1;
         let mut data = Vec::with_capacity(len);
         let mut perms = Vec::with_capacity(len);
-        let dirty = BTreeSet::new();
+        let dirty = Vec::with_capacity(dirty_len);
+        let mut dirty_flag = Vec::with_capacity(dirty_flag_len);
         unsafe {
             data.set_len(len);
             perms.set_len(len);
+            dirty_flag.set_len(dirty_flag_len);
         }
         data[..].fill(0);
         perms[..].fill(perm);
-        Self { data, perms, dirty, addr }
+        dirty_flag[..].fill(0);
+        Self { data, perms, dirty, dirty_flag, addr }
     }
 
     /// Access the backing array of data
@@ -275,9 +281,14 @@ impl Mapping {
             }
         }
         let start_block = offset.start / PAGE_SIZE;
-        let end_block = (offset.end + PAGE_SIZE) / PAGE_SIZE;
-        for block in start_block..end_block {
-            self.dirty.insert(block);
+        let end_block = offset.end / PAGE_SIZE;
+        for block in start_block..=end_block {
+            let idx = block / 64;
+            let bit = block % 64;
+            if self.dirty_flag[idx] & (1 << bit) == 0 {
+                self.dirty.push(block);
+                self.dirty_flag[idx] |= 1 << bit;
+            }
         }
         Ok(())
     }
@@ -302,15 +313,17 @@ impl Mapping {
     /// # Panics
     /// If `original` is not a clone of this mapping then this may panic.
     pub fn reset(&mut self, original: &Self) {
-        let len = self.data.len();
+        // Memory may not be a multiple of the page size. Need to make sure we don't address past
+        // the end of the last page.
+        let max_addr = self.data.len();
         for block in &self.dirty {
             let start = block * PAGE_SIZE;
-            let mut end = (block + 1) * PAGE_SIZE;
-            if end > len {
-                end = len;
-            }
+            let end = max_addr.min((block + 1) * PAGE_SIZE);
             self.data[start..end].copy_from_slice(&original.data[start..end]);
             self.perms[start..end].copy_from_slice(&original.perms[start..end]);
+            unsafe {
+                *self.dirty_flag.get_unchecked_mut(block / 64) = 0;
+            }
         }
         self.dirty.clear();
     }

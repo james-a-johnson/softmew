@@ -1,8 +1,16 @@
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Range};
-use std::collections::BTreeSet;
 use crate::fault::{Fault, Reason};
 
-const PAGE_SIZE: usize = 4096;
+/// This will control the size of a dirty block
+///
+/// Resetting works on blocks of memory and this controls that block size. Every time a write
+/// happens, the map will keep track of which blocks have been dirtied. Then on a reset every block
+/// will be reset to the original data. A write of any size to a block will dirty it so this
+/// parameter can change the performance of resetting a lot.
+///
+/// A large value for this means that only a few expensive memcopies will need to be made. A
+/// smaller value means a lot more cheap memcopies will be made.
+const PAGE_SIZE: usize = 64;
 
 /// Byte level memory permission
 ///
@@ -116,7 +124,8 @@ impl BitAndAssign for Perm {
 pub struct Mapping {
     data: Vec<u8>,
     perms: Vec<Perm>,
-    dirty: BTreeSet<usize>,
+    dirty: Vec<usize>,
+    dirty_flag: Vec<u64>,
     pub addr: usize,
 }
 
@@ -126,6 +135,7 @@ impl Mapping {
     /// Default permissions for all of the bytes will be [`Perm::READ`] and [`Perm::WRITE`].
     /// All bytes will be initialized to the value 0.
     #[must_use]
+    #[inline]
     pub fn new(addr: usize, len: usize) -> Self {
         Self::new_perm(addr, len, Perm::default())
     }
@@ -134,16 +144,21 @@ impl Mapping {
     /// `perm`.
     #[must_use]
     pub fn new_perm(addr: usize, len: usize, perm: Perm) -> Self {
+        let dirty_len = (len / PAGE_SIZE) + 1;
+        let dirty_flag_len = (len / PAGE_SIZE / 64) + 1;
         let mut data = Vec::with_capacity(len);
         let mut perms = Vec::with_capacity(len);
-        let dirty = BTreeSet::new();
+        let dirty = Vec::with_capacity(dirty_len);
+        let mut dirty_flag = Vec::with_capacity(dirty_flag_len);
         unsafe {
             data.set_len(len);
             perms.set_len(len);
+            dirty_flag.set_len(dirty_flag_len);
         }
         data[..].fill(0);
         perms[..].fill(perm);
-        Self { data, perms, dirty, addr }
+        dirty_flag[..].fill(0);
+        Self { data, perms, dirty, dirty_flag, addr }
     }
 
     /// Access the backing array of data
@@ -189,7 +204,9 @@ impl Mapping {
                 reason: Reason::NotMapped,
             });
         }
-        let perms = &self.perms[offset_range.clone()];
+        let perms = unsafe {
+            self.perms.get_unchecked(offset_range.clone())
+        };
         if !perms.iter().all(|p| *p & perm != Perm::NONE) {
             return Err(Fault {
                 address: addrs.clone(),
@@ -207,7 +224,9 @@ impl Mapping {
                 reason: Reason::NotMapped,
             });
         }
-        let perms = &self.perms[offset_range.clone()];
+        let perms = unsafe {
+            self.perms.get_unchecked(offset_range.clone())
+        };
         let mut write = Perm::WRITE;
         let mut raw = Perm::NONE;
         for p in perms {
@@ -242,7 +261,8 @@ impl Mapping {
     /// value as when it was passed to the function.
     pub fn read_perm(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         let offset = self.check_perm(addr..addr+buf.len(), Perm::READ)?;
-        buf.copy_from_slice(&self.data[offset]);
+        let accessed_data = unsafe { self.data.get_unchecked(offset) };
+        buf.copy_from_slice(accessed_data);
         Ok(())
     }
 
@@ -267,17 +287,24 @@ impl Mapping {
     /// value as when it was passed to the function.
     pub fn write_perm(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
         let (offset, has_raw) = self.check_perm_write(addr..addr+buf.len(), Perm::WRITE)?;
-        self.data[offset.clone()].copy_from_slice(buf);
+        let accessed_data = unsafe { self.data.get_unchecked_mut(offset.clone()) };
+        accessed_data.copy_from_slice(buf);
         // Optimize and assume that if any of the bytes have RAW set then all of them have RAW set
         if has_raw {
-            for p in &mut self.perms[offset.clone()] {
+            let perms_to_set = unsafe { self.perms.get_unchecked_mut(offset.clone()) };
+            for p in perms_to_set {
                 *p |= Perm::READ;
             }
         }
         let start_block = offset.start / PAGE_SIZE;
-        let end_block = (offset.end + PAGE_SIZE) / PAGE_SIZE;
-        for block in start_block..end_block {
-            self.dirty.insert(block);
+        let end_block = offset.end / PAGE_SIZE;
+        for block in start_block..=end_block {
+            let idx = block / 64;
+            let bit = block % 64;
+            if self.dirty_flag[idx] & (1 << bit) == 0 {
+                self.dirty.push(block);
+                self.dirty_flag[idx] |= 1 << bit;
+            }
         }
         Ok(())
     }
@@ -291,7 +318,8 @@ impl Mapping {
     /// Same as [`Mapping::read_perm`]
     pub fn fetch_perm(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         let offset = self.check_perm(addr..addr+buf.len(), Perm::EXEC)?;
-        buf.copy_from_slice(&self.data[offset]);
+        let accessed_data = unsafe { self.data.get_unchecked(offset) };
+        buf.copy_from_slice(accessed_data);
         Ok(())
     }
 
@@ -302,15 +330,25 @@ impl Mapping {
     /// # Panics
     /// If `original` is not a clone of this mapping then this may panic.
     pub fn reset(&mut self, original: &Self) {
-        let len = self.data.len();
+        // Memory may not be a multiple of the page size. Need to make sure we don't address past
+        // the end of the last page.
+        let max_addr = self.data.len();
         for block in &self.dirty {
             let start = block * PAGE_SIZE;
-            let mut end = (block + 1) * PAGE_SIZE;
-            if end > len {
-                end = len;
+            let end = max_addr.min((block + 1) * PAGE_SIZE);
+
+            // Copy data over
+            let my_data = unsafe { self.data.get_unchecked_mut(start..end) };
+            let orig_data = unsafe { original.data.get_unchecked(start..end) };
+            my_data.copy_from_slice(orig_data);
+
+            // Copy perms over
+            let my_perms = unsafe { self.perms.get_unchecked_mut(start..end) };
+            let orig_perms = unsafe { original.perms.get_unchecked(start..end) };
+            my_perms.copy_from_slice(orig_perms);
+            unsafe {
+                *self.dirty_flag.get_unchecked_mut(block / 64) = 0;
             }
-            self.data[start..end].copy_from_slice(&original.data[start..end]);
-            self.perms[start..end].copy_from_slice(&original.perms[start..end]);
         }
         self.dirty.clear();
     }

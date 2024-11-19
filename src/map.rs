@@ -327,8 +327,16 @@ impl Mapping {
         for block in &self.dirty {
             let start = block * PAGE_SIZE;
             let end = max_addr.min((block + 1) * PAGE_SIZE);
-            self.data[start..end].copy_from_slice(&original.data[start..end]);
-            self.perms[start..end].copy_from_slice(&original.perms[start..end]);
+
+            // Copy data over
+            let my_data = unsafe { self.data.get_unchecked_mut(start..end) };
+            let orig_data = unsafe { original.data.get_unchecked(start..end) };
+            my_data.copy_from_slice(orig_data);
+
+            // Copy perms over
+            let my_perms = unsafe { self.perms.get_unchecked_mut(start..end) };
+            let orig_perms = unsafe { original.perms.get_unchecked(start..end) };
+            my_perms.copy_from_slice(orig_perms);
             unsafe {
                 *self.dirty_flag.get_unchecked_mut(block / 64) = 0;
             }

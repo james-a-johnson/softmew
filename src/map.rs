@@ -195,7 +195,9 @@ impl Mapping {
                 reason: Reason::NotMapped,
             });
         }
-        let perms = &self.perms[offset_range.clone()];
+        let perms = unsafe {
+            self.perms.get_unchecked(offset_range.clone())
+        };
         if !perms.iter().all(|p| *p & perm != Perm::NONE) {
             return Err(Fault {
                 address: addrs.clone(),
@@ -213,7 +215,9 @@ impl Mapping {
                 reason: Reason::NotMapped,
             });
         }
-        let perms = &self.perms[offset_range.clone()];
+        let perms = unsafe {
+            self.perms.get_unchecked(offset_range.clone())
+        };
         let mut write = Perm::WRITE;
         let mut raw = Perm::NONE;
         for p in perms {
@@ -248,7 +252,8 @@ impl Mapping {
     /// value as when it was passed to the function.
     pub fn read_perm(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         let offset = self.check_perm(addr..addr+buf.len(), Perm::READ)?;
-        buf.copy_from_slice(&self.data[offset]);
+        let accessed_data = unsafe { self.data.get_unchecked(offset) };
+        buf.copy_from_slice(accessed_data);
         Ok(())
     }
 
@@ -273,10 +278,12 @@ impl Mapping {
     /// value as when it was passed to the function.
     pub fn write_perm(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
         let (offset, has_raw) = self.check_perm_write(addr..addr+buf.len(), Perm::WRITE)?;
-        self.data[offset.clone()].copy_from_slice(buf);
+        let accessed_data = unsafe { self.data.get_unchecked_mut(offset.clone()) };
+        accessed_data.copy_from_slice(buf);
         // Optimize and assume that if any of the bytes have RAW set then all of them have RAW set
         if has_raw {
-            for p in &mut self.perms[offset.clone()] {
+            let perms_to_set = unsafe { self.perms.get_unchecked_mut(offset.clone()) };
+            for p in perms_to_set {
                 *p |= Perm::READ;
             }
         }
@@ -302,7 +309,8 @@ impl Mapping {
     /// Same as [`Mapping::read_perm`]
     pub fn fetch_perm(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         let offset = self.check_perm(addr..addr+buf.len(), Perm::EXEC)?;
-        buf.copy_from_slice(&self.data[offset]);
+        let accessed_data = unsafe { self.data.get_unchecked(offset) };
+        buf.copy_from_slice(accessed_data);
         Ok(())
     }
 

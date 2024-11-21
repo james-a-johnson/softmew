@@ -1,8 +1,8 @@
 use crate::address::AddrRange;
 pub use crate::map::Mapping;
 pub use crate::fault::Fault;
+pub use crate::map::Perm;
 use crate::fault::Reason;
-use crate::map::Perm;
 
 pub mod address;
 pub mod map;
@@ -33,8 +33,8 @@ pub mod fault;
 /// # fn use_mmu(_mew: &mut MMU) {}
 ///
 /// let mut memory = MMU::new();
-/// memory.map_memory(0x1000, 0x2000, Perm::default()).expect("Failed to map data section");
-/// memory.map_memory(0x8000, 0x9000, Perm::READ | Perm::EXEC).expect("Failed to map code section");
+/// memory.map_memory(0x1000, 0x1000, Perm::default()).expect("Failed to map data section");
+/// memory.map_memory(0x8000, 0x1000, Perm::READ | Perm::EXEC).expect("Failed to map code section");
 ///
 /// let data = memory.get_mapping_mut(0x1000).expect("Failed to get data section");
 /// // load data here
@@ -44,7 +44,7 @@ pub mod fault;
 /// // code.data_mut().copy_from_slice(&code_data);
 ///
 /// // Make a snapshot
-/// let snapshot = memory.clone();
+/// let snapshot = memory.snapshot();
 ///
 /// // Use memory somehow
 /// use_mmu(&mut memory);
@@ -52,7 +52,7 @@ pub mod fault;
 /// // Reset memory
 /// memory.reset(&snapshot);
 /// ```
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct MMU {
     /// List of AddrRanges sorted by the lowest address in the range
     ///
@@ -111,7 +111,7 @@ impl MMU {
         None
     }
 
-    /// Create a new memory mapping of the address range [start, end) with the given permission
+    /// Create a new memory mapping of the address range [start, size+1) with the given permission
     ///
     /// # Errors
     /// Returns an error if any of the address ranges that are already mapped would overlap with
@@ -119,9 +119,10 @@ impl MMU {
     /// with it.
     ///
     /// # Panics
-    /// This function will panic if `end` <= `start`.
-    pub fn map_memory(&mut self, start: usize, end: usize, perm: Perm) -> Result<(), AddrRange> {
-        assert!(end > start, "Memory range is invalid");
+    /// Panics if `size` is zero. This MMU does not support zero sized memory mappings.
+    pub fn map_memory(&mut self, start: usize, size: usize, perm: Perm) -> Result<(), AddrRange> {
+        assert!(size != 0, "Zero sized memory mappings are not supported");
+        let end = start + size;
         // Loop through to make sure there isn't any overlap
         for map in &self.pages {
             // See
@@ -130,8 +131,8 @@ impl MMU {
                 return Err(*map);
             }
         }
-        let new_mapping = Mapping::new_perm(start, end - start, perm);
-        let new_range = AddrRange::new(start, end - start);
+        let new_mapping = Mapping::new_perm(start, size, perm);
+        let new_range = AddrRange::new(start, size);
         self.pages.push(new_range);
         self.data.push(new_mapping);
         self.pages.sort();
@@ -205,6 +206,24 @@ impl MMU {
             }
         }
     }
+
+    /// Check if any state in the MMU has been dirtied
+    pub fn dirtied(&self) -> bool {
+        self.data.iter().any(|d| d.dirtied())
+    }
+
+    /// Snapshot the entire MMU state
+    ///
+    /// This is basically just a clone but will clear dirty state of all mappings without reverting
+    /// the memory.
+    pub fn snapshot(&mut self) -> Self {
+        let pages = self.pages.clone();
+        let mut data = Vec::with_capacity(self.data.len());
+        for d in &mut self.data {
+            data.push(d.snapshot());
+        }
+        Self { pages, data }
+    }
 }
 
 #[cfg(test)]
@@ -215,10 +234,10 @@ mod test {
     fn overlapping() {
         let mut mew = MMU::new();
         let expected = AddrRange::new(0x100, 0x100);
-        mew.map_memory(0x100, 0x200, Perm::default()).expect("Failed to map first memory region");
+        mew.map_memory(0x100, 0x100, Perm::default()).expect("Failed to map first memory region");
 
         // First byte overlaps
-        let res = mew.map_memory(0x10, 0x101, Perm::default());
+        let res = mew.map_memory(0x0, 0x101, Perm::default());
         let err = res.expect_err("Overlapping memory mapping succeeded");
         assert_eq!(err, expected);
 
@@ -233,19 +252,19 @@ mod test {
         assert_eq!(err, expected);
 
         // Old mapping completely contains new one
-        let res = mew.map_memory(0x110, 0x120, Perm::default());
+        let res = mew.map_memory(0x110, 0x20, Perm::default());
         let err = res.expect_err("Overlapping memory mapping succeeded");
         assert_eq!(err, expected);
 
-        mew.map_memory(0x80, 0x100, Perm::default()).expect("Failed to map second memory region");
-        mew.map_memory(0x200, 0x280, Perm::default()).expect("Failed to map third memory region");
+        mew.map_memory(0x80, 0x80, Perm::default()).expect("Failed to map second memory region");
+        mew.map_memory(0x200, 0x80, Perm::default()).expect("Failed to map third memory region");
     }
 
     #[test]
     fn get() {
         let mut mew = MMU::new();
-        mew.map_memory(0x1000, 0x2000, Perm::default()).unwrap();
-        mew.map_memory(0x8000, 0x9000, Perm::default()).unwrap();
+        mew.map_memory(0x1000, 0x1000, Perm::default()).unwrap();
+        mew.map_memory(0x8000, 0x1000, Perm::default()).unwrap();
         {
             let map = mew.get_mapping(0x1080).expect("Failed to get mapped memory");
             assert_eq!(map.addr, 0x1000, "Mapping did not have expected address of 0x1000");

@@ -15,7 +15,7 @@ fn write_and_reset(mew: &mut MMU, orig: &MMU) {
 fn reset_benchmark(c: &mut Criterion) {
     let mut mew = MMU::new();
     mew.map_memory(0x1000, 0x4000, Perm::default()).expect("First mapping failed");
-    mew.map_memory(0x10000, 0x18000, Perm::default()).expect("Second mapping failed");
+    mew.map_memory(0x10000, 0x8000, Perm::default()).expect("Second mapping failed");
     let orig = mew.clone();
 
     c.bench_function("resetting", |b| b.iter(|| write_and_reset(black_box(&mut mew), black_box(&orig))));
@@ -24,7 +24,7 @@ fn reset_benchmark(c: &mut Criterion) {
 fn reset_no_change(c: &mut Criterion) {
     let mut mew = MMU::new();
     mew.map_memory(0x1000, 0x4000, Perm::default()).expect("First mapping failed");
-    mew.map_memory(0x10000, 0x18000, Perm::default()).expect("Second mapping failed");
+    mew.map_memory(0x10000, 0x8000, Perm::default()).expect("Second mapping failed");
     let orig = mew.clone();
 
     c.bench_function("null reset", |b| b.iter(|| mew.reset(black_box(&orig))));

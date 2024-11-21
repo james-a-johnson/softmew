@@ -11,7 +11,7 @@ pub fn main() {
     let data = mew.get_mapping_mut(0x100).unwrap();
     data.data_mut()[0..4].copy_from_slice(b"asdf");
 
-    let forked = mew.clone();
+    let forked = mew.snapshot();
     for _ in 0..100_000_000 {
         mew.write_perm(0x100, b"hello").unwrap();
         mew.reset(&forked);

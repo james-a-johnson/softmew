@@ -187,9 +187,6 @@ impl Mapping {
     /// Check that some address range is properly contained by this mapping and has the correct
     /// permissions.
     ///
-    /// This function makes one assumption which is that the first address of the range is properly
-    /// contained by this mapping. No other assumptions are made and all other checks will be made.
-    ///
     /// If all checks pass, this function will return a range that can be used to index the data
     /// contained by this struct to access the requested addresses.
     ///
@@ -197,6 +194,12 @@ impl Mapping {
     /// Returns an error if any address goes out of range of this mapping or the required
     /// permissions are not met.
     fn check_perm(&self, addrs: Range<usize>, perm: Perm) -> Result<Range<usize>, Fault> {
+        if addrs.start < self.addr {
+            return Err(Fault {
+                address: addrs.clone(),
+                reason: Reason::NotMapped,
+            });
+        }
         let offset_range = (addrs.start - self.addr)..(addrs.end - self.addr);
         if offset_range.end > self.data.len() {
             return Err(Fault {
@@ -217,6 +220,12 @@ impl Mapping {
     }
 
     fn check_perm_write(&self, addrs: Range<usize>, perm: Perm) -> Result<(Range<usize>, bool), Fault> {
+        if addrs.start < self.addr {
+            return Err(Fault {
+                address: addrs.clone(),
+                reason: Reason::NotMapped,
+            });
+        }
         let offset_range = (addrs.start - self.addr)..(addrs.end - self.addr);
         if offset_range.end > self.data.len() {
             return Err(Fault {
@@ -329,7 +338,7 @@ impl Mapping {
     ///
     /// # Panics
     /// If `original` is not a clone of this mapping then this may panic.
-    pub fn reset(&mut self, original: &Self) {
+    pub(crate) fn reset(&mut self, original: &Self) {
         // Memory may not be a multiple of the page size. Need to make sure we don't address past
         // the end of the last page.
         let max_addr = self.data.len();
@@ -359,7 +368,7 @@ impl Mapping {
     /// track of writes to its backing memory to increase the rate at which it can return to a
     /// snapshotted state.
     #[must_use]
-    pub fn dirtied(&self) -> bool {
+    pub(crate) fn dirtied(&self) -> bool {
         !self.dirty.is_empty()
     }
 }

@@ -120,7 +120,6 @@ impl BitAndAssign for Perm {
 ///
 /// [`Mapping::data`] and [`Mapping::data_mut`] allow for access to the backing buffer of data as a
 /// plain slice of bytes.
-#[derive(Clone)]
 pub struct Mapping {
     data: Vec<u8>,
     perms: Vec<Perm>,
@@ -250,6 +249,26 @@ impl Mapping {
             });
         }
         Ok((offset_range, raw.raw()))
+    }
+
+    /// Take a snapshot of the current state of the mapping
+    ///
+    /// Returns a copy of all of the memory and permissions. This is essentially just a clone but
+    /// will clear all of the dirty state tracking.
+    pub fn snapshot(&mut self) -> Self {
+        self.dirty.clear();
+        self.dirty_flag[..].fill(0);
+        let data = self.data.clone();
+        let perms = self.perms.clone();
+        let dirty = Vec::with_capacity(self.dirty.capacity());
+        let dirty_flag = self.dirty_flag.clone();
+        Self{
+            data,
+            perms,
+            dirty,
+            dirty_flag,
+            addr: self.addr,
+        }
     }
 
     /// Read memory with permission checks
@@ -385,7 +404,7 @@ mod test {
         let data3 = b"123456";
         map.write_perm(0x10f, data).expect("Failed first write");
         map.write_perm(0x409e, data).expect("Failed second write");
-        let snapshot = map.clone();
+        let snapshot = map.snapshot();
         map.write_perm(0x10f, data2).expect("Failed first overwrite");
         map.write_perm(0x409e, data3).expect("Failed second overwrite");
         map.reset(&snapshot);

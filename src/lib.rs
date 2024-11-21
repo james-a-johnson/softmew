@@ -44,7 +44,7 @@ pub mod fault;
 /// // code.data_mut().copy_from_slice(&code_data);
 ///
 /// // Make a snapshot
-/// let snapshot = memory.clone();
+/// let snapshot = memory.snapshot();
 ///
 /// // Use memory somehow
 /// use_mmu(&mut memory);
@@ -52,7 +52,7 @@ pub mod fault;
 /// // Reset memory
 /// memory.reset(&snapshot);
 /// ```
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct MMU {
     /// List of AddrRanges sorted by the lowest address in the range
     ///
@@ -205,6 +205,24 @@ impl MMU {
                 dirty.reset(orig);
             }
         }
+    }
+
+    /// Check if any state in the MMU has been dirtied
+    pub fn dirtied(&self) -> bool {
+        self.data.iter().any(|d| d.dirtied())
+    }
+
+    /// Snapshot the entire MMU state
+    ///
+    /// This is basically just a clone but will clear dirty state of all mappings without reverting
+    /// the memory.
+    pub fn snapshot(&mut self) -> Self {
+        let pages = self.pages.clone();
+        let mut data = Vec::with_capacity(self.data.len());
+        for d in &mut self.data {
+            data.push(d.snapshot());
+        }
+        Self { pages, data }
     }
 }
 

@@ -167,20 +167,9 @@ impl MMUSimple {
     /// If no mapping is found, None is returned.
     #[must_use]
     pub fn get_mapping(&self, addr: usize) -> Option<&SimpleMap> {
-        debug_assert!(self.pages.is_sorted(), "Pages list is not sorted");
-        debug_assert!(
-            self.data.is_sorted_by(|d1, d2| d1.addr < d2.addr),
-            "Memory mappings are not sorted"
-        );
-        for (i, map) in self.pages.iter().enumerate() {
-            if map.contains(addr) {
-                // SAFETY: The pages and data vectors will always be kept in sync. So a valid index
-                // for the pages vector will be a valid index for the data vector. i is a valid
-                // index into pages so it will be a valid index into data.
-                return Some(unsafe { self.data.get_unchecked(i) });
-            }
-        }
-        None
+        let idx = self.get_mapping_idx(addr)?;
+        // SAFETY: get_mapping_idx returns a valid index into the data vector
+        Some(unsafe { self.data.get_unchecked(idx) })
     }
 
     /// Get a mutable reference to the mapping associated with `addr`
@@ -188,18 +177,21 @@ impl MMUSimple {
     /// Same as [`MMUSimple::get_mapping`] but will get a mutable reference.
     #[must_use]
     pub fn get_mapping_mut(&mut self, addr: usize) -> Option<&mut SimpleMap> {
+        let idx = self.get_mapping_idx(addr)?;
+        // SAFETY: get_mapping_idx returns a valid index into the data vector
+        Some(unsafe { self.data.get_unchecked_mut(idx) })
+    }
+
+    /// Get the index of the pages and data entries that correspond to the given address
+    fn get_mapping_idx(&self, addr: usize) -> Option<usize> {
         debug_assert!(self.pages.is_sorted(), "Pages list is not sorted");
         debug_assert!(
             self.data.is_sorted_by(|d1, d2| d1.addr < d2.addr),
             "Memory mappings are not sorted"
         );
-        for (i, map) in self.pages.iter().enumerate() {
-            if map.contains(addr) {
-                // SAFETY: See safety comment in `get_mapping`
-                return Some(unsafe { self.data.get_unchecked_mut(i) });
-            }
-        }
-        None
+        self.pages
+            .binary_search_by(|map| map.compare_to_addr(addr))
+            .ok()
     }
 
     /// Reads some memory in this MMU's memory space

@@ -20,11 +20,11 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 /// A special RAW permission is included here as a way to detect uninitialized memory accesses.
 /// RAW stands for Read After Write. Any memory that has that permission set will gain the read
 /// permission when it is written to.
-/// 
+///
 /// When using RAW you should not use [`Perm::READ`] as well on the memory or else it will have
 /// no affect. The read permission means that it is safe to read the memory at any point during
 /// execution. So a read to that memory before it has been initialized will not cause a fault.
-/// 
+///
 /// # NOTE
 /// Any combination of permissions is allowed. You can set memory as being write only and
 /// that memory will be write only. Any attempt to read or execute from that memory will

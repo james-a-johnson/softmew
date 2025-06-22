@@ -1,14 +1,14 @@
 use crate::address::AddrRange;
-use crate::map::Mapping;
 pub use crate::fault::Fault;
-pub use crate::permission::Perm;
 use crate::fault::Reason;
+use crate::map::Mapping;
+pub use crate::permission::Perm;
 
 pub mod address;
-pub mod map;
 pub mod fault;
-pub mod simple;
+pub mod map;
 pub mod permission;
+pub mod simple;
 
 /// Collection of methods that are supported by all types of MMUs.
 pub trait Memory {
@@ -60,7 +60,8 @@ pub trait Memory {
 /// use_mmu(&mut memory);
 ///
 /// // Reset memory
-/// memory.reset(&snapshot);
+/// // snapshot is a snapshot of memory so it is safe to use here
+/// unsafe { memory.reset(&snapshot); }
 /// ```
 #[derive(Default)]
 pub struct MMU {
@@ -98,8 +99,12 @@ impl MMU {
     #[inline]
     pub fn get_mapping(&self, addr: usize) -> Option<&Mapping> {
         debug_assert!(self.pages.is_sorted(), "Pages list is not sorted");
-        debug_assert!(self.data.is_sorted_by(|d1, d2| d1.addr < d2.addr), "Memory mappings are not sorted");
+        debug_assert!(
+            self.data.is_sorted_by(|d1, d2| d1.addr < d2.addr),
+            "Memory mappings are not sorted"
+        );
         let idx = self.get_mapping_idx(addr)?;
+        // SAFETY: See safety comment in get_mapping_mut
         Some(unsafe { &self.data.get_unchecked(idx) })
     }
 
@@ -110,15 +115,23 @@ impl MMU {
     #[inline]
     pub fn get_mapping_mut(&mut self, addr: usize) -> Option<&mut Mapping> {
         debug_assert!(self.pages.is_sorted(), "Pages list is not sorted");
-        debug_assert!(self.data.is_sorted_by(|d1, d2| d1.addr < d2.addr), "Memory mappings are not sorted");
+        debug_assert!(
+            self.data.is_sorted_by(|d1, d2| d1.addr < d2.addr),
+            "Memory mappings are not sorted"
+        );
         let idx = self.get_mapping_idx(addr)?;
+        // SAFETY: idx is returned by get_mapping_idx which will return a valid index into the pages
+        // vector. The pages and data vectors are always kept in sync so a valid page index is
+        // valid data index. That makes this unchecked access safe.
         Some(unsafe { self.data.get_unchecked_mut(idx) })
     }
-    
+
     #[must_use]
     #[inline]
     fn get_mapping_idx(&self, addr: usize) -> Option<usize> {
-        self.pages.binary_search_by(|map| map.compare_to_addr(addr)).ok()
+        self.pages
+            .binary_search_by(|map| map.compare_to_addr(addr))
+            .ok()
     }
 
     /// Create a new memory mapping of the address range [start, size+1) with the given permission.
@@ -132,7 +145,12 @@ impl MMU {
     ///
     /// # Panics
     /// Panics if `size` is zero. This MMU does not support zero sized memory mappings.
-    pub fn map_memory(&mut self, start: usize, size: usize, perm: Perm) -> Result<&mut Mapping, AddrRange> {
+    pub fn map_memory(
+        &mut self,
+        start: usize,
+        size: usize,
+        perm: Perm,
+    ) -> Result<&mut Mapping, AddrRange> {
         assert_ne!(size, 0, "Zero sized memory mappings are not supported");
         let end = start + size;
         // Loop through to make sure there isn't any overlap
@@ -163,7 +181,7 @@ impl MMU {
     /// returned by the underlying [`Mapping`].
     pub fn read_perm(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         let map = self.get_mapping(addr).ok_or(Fault {
-            address: addr..addr+buf.len(),
+            address: addr..addr + buf.len(),
             reason: Reason::NotMapped,
         })?;
         map.read_perm(addr, buf)
@@ -180,7 +198,7 @@ impl MMU {
     /// returned by the underlying [`Mapping`].
     pub fn write_perm(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
         let map = self.get_mapping_mut(addr).ok_or(Fault {
-            address: addr..addr+buf.len(),
+            address: addr..addr + buf.len(),
             reason: Reason::NotMapped,
         })?;
         map.write_perm(addr, buf)
@@ -197,7 +215,7 @@ impl MMU {
     /// returned by the underlying [`Mapping`].
     pub fn fetch_perm(&mut self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         let map = self.get_mapping(addr).ok_or(Fault {
-            address: addr..addr+buf.len(),
+            address: addr..addr + buf.len(),
             reason: Reason::NotMapped,
         })?;
         map.fetch_perm(addr, buf)
@@ -208,14 +226,19 @@ impl MMU {
     /// Resets all of the memory in this MMU to the state that it was at when `original` was cloned
     /// from this MMU.
     ///
+    /// # Safety
+    /// Requires that original be a snapshot of this mapping.
+    ///
     /// # Panics
     /// May panic if `original` was not cloned from this MMU or if more more memory was mapped to
     /// `original` after it was cloned.
-    pub fn reset(&mut self, original: &Self) {
+    pub unsafe fn reset(&mut self, original: &Self) {
         debug_assert_eq!(self.data.len(), original.data.len());
         for (dirty, orig) in self.data.iter_mut().zip(original.data.iter()) {
             if dirty.dirtied() {
-                dirty.reset(orig);
+                unsafe {
+                    dirty.reset(orig);
+                }
             }
         }
     }
@@ -243,7 +266,7 @@ impl Memory for MMU {
     fn read(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         self.read_perm(addr, buf)
     }
-    
+
     fn write(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
         self.write_perm(addr, buf)
     }
@@ -257,7 +280,8 @@ mod test {
     fn overlapping() {
         let mut mew = MMU::new();
         let expected = AddrRange::new(0x100, 0x100);
-        mew.map_memory(0x100, 0x100, Perm::default()).expect("Failed to map first memory region");
+        mew.map_memory(0x100, 0x100, Perm::default())
+            .expect("Failed to map first memory region");
 
         // First byte overlaps
         let res = mew.map_memory(0x0, 0x101, Perm::default());
@@ -279,8 +303,10 @@ mod test {
         let err = res.expect_err("Overlapping memory mapping succeeded");
         assert_eq!(err, expected);
 
-        mew.map_memory(0x80, 0x80, Perm::default()).expect("Failed to map second memory region");
-        mew.map_memory(0x200, 0x80, Perm::default()).expect("Failed to map third memory region");
+        mew.map_memory(0x80, 0x80, Perm::default())
+            .expect("Failed to map second memory region");
+        mew.map_memory(0x200, 0x80, Perm::default())
+            .expect("Failed to map third memory region");
     }
 
     #[test]
@@ -289,12 +315,22 @@ mod test {
         mew.map_memory(0x1000, 0x1000, Perm::default()).unwrap();
         mew.map_memory(0x8000, 0x1000, Perm::default()).unwrap();
         {
-            let map = mew.get_mapping(0x1080).expect("Failed to get mapped memory");
-            assert_eq!(map.addr, 0x1000, "Mapping did not have expected address of 0x1000");
+            let map = mew
+                .get_mapping(0x1080)
+                .expect("Failed to get mapped memory");
+            assert_eq!(
+                map.addr, 0x1000,
+                "Mapping did not have expected address of 0x1000"
+            );
         }
         {
-            let map = mew.get_mapping(0x8080).expect("Failed to get mapped memory");
-            assert_eq!(map.addr, 0x8000, "Mapping did not have expected address of 0x8000");
+            let map = mew
+                .get_mapping(0x8080)
+                .expect("Failed to get mapped memory");
+            assert_eq!(
+                map.addr, 0x8000,
+                "Mapping did not have expected address of 0x8000"
+            );
         }
         let res = mew.get_mapping(0x2000);
         assert!(res.is_none(), "Got mapping for invalid address");
@@ -302,11 +338,13 @@ mod test {
         let res = mew.get_mapping(0x9000);
         assert!(res.is_none(), "Got mapping for invalid address");
     }
-    
+
     #[test]
     fn raw() {
         let mut mew = MMU::new();
-        let _data = mew.map_memory(0xaf00, 0x8000, Perm::WRITE | Perm::RAW).unwrap();
+        let _data = mew
+            .map_memory(0xaf00, 0x8000, Perm::WRITE | Perm::RAW)
+            .unwrap();
         let mut a = [0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8];
         let read = mew.read_perm(0xaf01, &mut a);
         assert!(read.is_err());

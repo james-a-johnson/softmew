@@ -2,8 +2,8 @@
 //
 // Gamozo was ble to get this down to about 900 milliseconds.
 
-use softmew::MMU;
 use softmew::permission::Perm;
+use softmew::MMU;
 
 pub fn main() {
     let mut mew = MMU::new();
@@ -14,6 +14,9 @@ pub fn main() {
     let forked = mew.snapshot();
     for _ in 0..100_000_000 {
         mew.write_perm(0x100, b"hello").unwrap();
-        mew.reset(&forked);
+        // SAFETY: forked is a snapshot of mew so it is safe to use here.
+        unsafe {
+            mew.reset(&forked);
+        }
     }
 }

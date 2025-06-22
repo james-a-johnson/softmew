@@ -1,7 +1,7 @@
+use crate::permission::Perm;
 use std::error::Error;
 use std::fmt::Display;
 use std::ops::Range;
-use crate::permission::Perm;
 
 /// Memory fault
 ///
@@ -52,14 +52,21 @@ impl From<Perm> for Reason {
 
 impl std::fmt::Debug for Fault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Failed to read 0x{:016X}..0x{:016X} reason: {}",
-               self.address.start, self.address.end, self.reason)
+        write!(
+            f,
+            "Failed to read 0x{:016X}..0x{:016X} reason: {}",
+            self.address.start, self.address.end, self.reason
+        )
     }
 }
 
 impl Display for Fault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}-{}: {}", self.address.start, self.address.end, self.reason)
+        write!(
+            f,
+            "{}-{}: {}",
+            self.address.start, self.address.end, self.reason
+        )
     }
 }
 

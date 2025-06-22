@@ -302,4 +302,16 @@ mod test {
         let res = mew.get_mapping(0x9000);
         assert!(res.is_none(), "Got mapping for invalid address");
     }
+    
+    #[test]
+    fn raw() {
+        let mut mew = MMU::new();
+        let _data = mew.map_memory(0xaf00, 0x8000, Perm::WRITE | Perm::RAW).unwrap();
+        let mut a = [0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8];
+        let read = mew.read_perm(0xaf01, &mut a);
+        assert!(read.is_err());
+        let err = read.unwrap_err();
+        assert_eq!(err.reason, Reason::NotReadable);
+        assert_eq!(err.address, 0xaf01..0xaf09);
+    }
 }

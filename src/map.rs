@@ -121,7 +121,7 @@ impl Mapping {
         let perms = unsafe {
             self.perms.get_unchecked(offset_range.clone())
         };
-        if !perms.iter().all(|p| *p & perm != Perm::NONE) {
+        if !perms.iter().all(|p| *p & perm == perm) {
             return Err(Fault {
                 address: addrs.clone(),
                 reason: perm.into(),

@@ -27,10 +27,10 @@ const PAGE_SIZE: usize = 64;
 /// [`Mapping::data`] and [`Mapping::data_mut`] allow for access to the backing buffer of data as a
 /// plain slice of bytes.
 pub struct Mapping {
-    data: Vec<u8>,
-    perms: Vec<Perm>,
+    data: Box<[u8]>,
+    perms: Box<[Perm]>,
     dirty: Vec<usize>,
-    dirty_flag: Vec<u64>,
+    dirty_flag: Box<[u64]>,
     pub addr: usize,
 }
 
@@ -69,7 +69,7 @@ impl Mapping {
         data[..].fill(0);
         perms[..].fill(perm);
         dirty_flag[..].fill(0);
-        Self { data, perms, dirty, dirty_flag, addr }
+        Self { data: data.into_boxed_slice(), perms: perms.into_boxed_slice(), dirty, dirty_flag: dirty_flag.into_boxed_slice(), addr }
     }
 
     /// Access the backing array of data

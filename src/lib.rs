@@ -95,30 +95,30 @@ impl MMU {
     ///
     /// If no mapping is found, None is returned.
     #[must_use]
+    #[inline]
     pub fn get_mapping(&self, addr: usize) -> Option<&Mapping> {
         debug_assert!(self.pages.is_sorted(), "Pages list is not sorted");
         debug_assert!(self.data.is_sorted_by(|d1, d2| d1.addr < d2.addr), "Memory mappings are not sorted");
-        for (i, map) in self.pages.iter().enumerate() {
-            if map.contains(addr) {
-                return Some(unsafe { self.data.get_unchecked(i) })
-            }
-        }
-        None
+        let idx = self.get_mapping_idx(addr)?;
+        Some(unsafe { &self.data.get_unchecked(idx) })
     }
 
     /// Get a mutable reference to the mapping associated with `addr`
     ///
     /// Same as [`MMU::get_mapping`] but will get a mutable reference.
     #[must_use]
+    #[inline]
     pub fn get_mapping_mut(&mut self, addr: usize) -> Option<&mut Mapping> {
         debug_assert!(self.pages.is_sorted(), "Pages list is not sorted");
         debug_assert!(self.data.is_sorted_by(|d1, d2| d1.addr < d2.addr), "Memory mappings are not sorted");
-        for (i, map) in self.pages.iter().enumerate() {
-            if map.contains(addr) {
-                return Some(unsafe { self.data.get_unchecked_mut(i) })
-            }
-        }
-        None
+        let idx = self.get_mapping_idx(addr)?;
+        Some(unsafe { self.data.get_unchecked_mut(idx) })
+    }
+    
+    #[must_use]
+    #[inline]
+    fn get_mapping_idx(&self, addr: usize) -> Option<usize> {
+        self.pages.binary_search_by(|map| map.compare_to_addr(addr)).ok()
     }
 
     /// Create a new memory mapping of the address range [start, size+1) with the given permission.

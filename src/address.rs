@@ -27,8 +27,21 @@ impl AddrRange {
 
     /// Checks for containment of the address
     #[must_use]
+    #[inline]
     pub fn contains(&self, addr: usize) -> bool {
         self.start <= addr && addr < self.end
+    }
+    
+    /// Compares this address range to a specific address.
+    #[inline]
+    pub fn compare_to_addr(&self, addr: usize) -> Ordering {
+        if self.contains(addr) {
+            Ordering::Equal
+        } else if self.start >= addr {
+            Ordering::Greater
+        } else {
+            Ordering::Less
+        }
     }
 }
 

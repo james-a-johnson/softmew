@@ -1,9 +1,12 @@
+use std::error::Error;
+use std::fmt::Display;
 use std::ops::Range;
-use crate::map::Perm;
+use crate::permission::Perm;
 
 /// Memory fault
 ///
 /// This will be returned when some error happens when reading memory.
+#[derive(Clone)]
 pub struct Fault {
     /// The addresses that were being accessed
     ///
@@ -14,6 +17,8 @@ pub struct Fault {
     /// Type of memory fault that occurred.
     pub reason: Reason,
 }
+
+impl Error for Fault {}
 
 /// Types of memory faults
 ///
@@ -40,7 +45,7 @@ impl From<Perm> for Reason {
             Perm::READ => Self::NotReadable,
             Perm::WRITE => Self::NotWritable,
             Perm::EXEC => Self::NotExecutable,
-            _ => unreachable!(),
+            _ => panic!("Encountered unexpected permission"),
         }
     }
 }
@@ -52,13 +57,19 @@ impl std::fmt::Debug for Fault {
     }
 }
 
-impl std::fmt::Display for Reason {
+impl Display for Fault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NotMapped => write!(f, "Memory is not mapped"),
-            Self::NotReadable => write!(f, "Memory does not have read permission set"),
-            Self::NotWritable => write!(f, "Memory does not have write permission set"),
-            Self::NotExecutable => write!(f, "Memory does not have execute permission set"),
+        write!(f, "{}-{}: {}", self.address.start, self.address.end, self.reason)
+    }
+}
+
+impl Display for Reason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Reason::NotMapped => write!(f, "Memory range is not mapped"),
+            Reason::NotReadable => write!(f, "Memory range does not have read permission"),
+            Reason::NotWritable => write!(f, "Memory range does not have write permission"),
+            Reason::NotExecutable => write!(f, "Memory range does not have executable permission"),
         }
     }
 }

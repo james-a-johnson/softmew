@@ -3,7 +3,7 @@
 // Gamozo was able to get this down to about 125 milliseconds.
 
 use softmew::MMU;
-use softmew::map::Perm;
+use softmew::permission::Perm;
 
 pub fn main() {
     let mut mew = MMU::new();

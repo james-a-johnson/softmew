@@ -1,12 +1,27 @@
 use crate::address::AddrRange;
-pub use crate::map::Mapping;
+use crate::map::Mapping;
 pub use crate::fault::Fault;
-pub use crate::map::Perm;
+pub use crate::permission::Perm;
 use crate::fault::Reason;
 
 pub mod address;
 pub mod map;
 pub mod fault;
+pub mod simple;
+pub mod permission;
+
+/// Collection of methods that are supported by all types of MMUs.
+pub trait Memory {
+    /// Read data from address into a buffer.
+    ///
+    /// This read will respect all permissions set on the memory.
+    fn read(&self, addr: usize, data: &mut [u8]) -> Result<(), Fault>;
+
+    /// Write data from buffer to specified address.
+    ///
+    /// Respects all permissions set on memory.
+    fn write(&mut self, addr: usize, data: &[u8]) -> Result<(), Fault>;
+}
 
 /// Software memory management unit
 ///
@@ -28,20 +43,15 @@ pub mod fault;
 /// # Examples
 /// ```
 /// use softmew::MMU;
-/// use softmew::map::Perm;
+/// use softmew::permission::Perm;
 ///
 /// # fn use_mmu(_mew: &mut MMU) {}
 ///
 /// let mut memory = MMU::new();
-/// memory.map_memory(0x1000, 0x1000, Perm::default()).expect("Failed to map data section");
-/// memory.map_memory(0x8000, 0x1000, Perm::READ | Perm::EXEC).expect("Failed to map code section");
-///
-/// let data = memory.get_mapping_mut(0x1000).expect("Failed to get data section");
-/// // load data here
-/// // data.data_mut().copy_from_slice(&rw_data);
-/// let code = memory.get_mapping_mut(0x8000).expect("Failed to get code section");
-/// // load code data here
-/// // code.data_mut().copy_from_slice(&code_data);
+/// let data = memory.map_memory(0x1000, 0x1000, Perm::default()).expect("Failed to map data section");
+/// data.data_mut()[..8].copy_from_slice(&[0, 1, 2, 3, 4, 5, 6, 7]);
+/// let code = memory.map_memory(0x8000, 0x1000, Perm::READ | Perm::EXEC).expect("Failed to map code section");
+/// code.data_mut()[..8].copy_from_slice(&[8, 9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf]);
 ///
 /// // Make a snapshot
 /// let snapshot = memory.snapshot();
@@ -111,7 +121,9 @@ impl MMU {
         None
     }
 
-    /// Create a new memory mapping of the address range [start, size+1) with the given permission
+    /// Create a new memory mapping of the address range [start, size+1) with the given permission.
+    ///
+    /// Returns a mutable reference to the newly created mapping so that it can be initialized.
     ///
     /// # Errors
     /// Returns an error if any of the address ranges that are already mapped would overlap with
@@ -120,8 +132,8 @@ impl MMU {
     ///
     /// # Panics
     /// Panics if `size` is zero. This MMU does not support zero sized memory mappings.
-    pub fn map_memory(&mut self, start: usize, size: usize, perm: Perm) -> Result<(), AddrRange> {
-        assert!(size != 0, "Zero sized memory mappings are not supported");
+    pub fn map_memory(&mut self, start: usize, size: usize, perm: Perm) -> Result<&mut Mapping, AddrRange> {
+        assert_ne!(size, 0, "Zero sized memory mappings are not supported");
         let end = start + size;
         // Loop through to make sure there isn't any overlap
         for map in &self.pages {
@@ -137,7 +149,8 @@ impl MMU {
         self.data.push(new_mapping);
         self.pages.sort();
         self.data.sort_by(|m1, m2| m1.addr.cmp(&m2.addr));
-        Ok(())
+        // This cannot panic because we just inserted the mapping that we're requesting.
+        Ok(self.get_mapping_mut(start).unwrap())
     }
 
     /// Reads some memory in this MMU's memory space
@@ -226,6 +239,16 @@ impl MMU {
     }
 }
 
+impl Memory for MMU {
+    fn read(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
+        self.read_perm(addr, buf)
+    }
+    
+    fn write(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
+        self.write_perm(addr, buf)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -278,5 +301,17 @@ mod test {
 
         let res = mew.get_mapping(0x9000);
         assert!(res.is_none(), "Got mapping for invalid address");
+    }
+    
+    #[test]
+    fn raw() {
+        let mut mew = MMU::new();
+        let _data = mew.map_memory(0xaf00, 0x8000, Perm::WRITE | Perm::RAW).unwrap();
+        let mut a = [0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8];
+        let read = mew.read_perm(0xaf01, &mut a);
+        assert!(read.is_err());
+        let err = read.unwrap_err();
+        assert_eq!(err.reason, Reason::NotReadable);
+        assert_eq!(err.address, 0xaf01..0xaf09);
     }
 }

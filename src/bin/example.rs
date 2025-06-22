@@ -1,5 +1,5 @@
 use softmew::MMU;
-use softmew::map::Perm;
+use softmew::permission::Perm;
 
 pub fn main() {
     let mut mew = MMU::new();

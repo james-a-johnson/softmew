@@ -1,5 +1,5 @@
 use crate::address::AddrRange;
-pub use crate::fault::Fault;
+use crate::fault::Fault;
 use crate::fault::Reason;
 use crate::page::{Page, SnapshotPage};
 pub use crate::permission::Perm;

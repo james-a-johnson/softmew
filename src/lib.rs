@@ -15,11 +15,18 @@ pub trait Memory {
     /// Read data from address into a buffer.
     ///
     /// This read will respect all permissions set on the memory.
+    ///
+    /// # Errors
+    /// Can error for an invalid address or missing read permissions on the data.
+    /// See [`Reason`] for the potential causes of an error.
     fn read(&self, addr: usize, data: &mut [u8]) -> Result<(), Fault>;
 
     /// Write data from buffer to specified address.
     ///
     /// Respects all permissions set on memory.
+    /// # Errors
+    /// Can error for an invalid address or missing write permissions on the data.
+    /// See [`Reason`] for the potential causes of an error.
     fn write(&mut self, addr: usize, data: &[u8]) -> Result<(), Fault>;
 }
 
@@ -65,7 +72,7 @@ pub trait Memory {
 /// ```
 #[derive(Default)]
 pub struct MMU {
-    /// List of AddrRanges sorted by the lowest address in the range
+    /// List of `AddrRanges` sorted by the lowest address in the range
     ///
     /// Must always remain sorted or else everything will break. It is assumed that an element at
     /// index `i` in pages is the address range for the backing memory at index `i` in data.
@@ -105,7 +112,7 @@ impl MMU {
         );
         let idx = self.get_mapping_idx(addr)?;
         // SAFETY: See safety comment in get_mapping_mut
-        Some(unsafe { &self.data.get_unchecked(idx) })
+        Some(unsafe { self.data.get_unchecked(idx) })
     }
 
     /// Get a mutable reference to the mapping associated with `addr`
@@ -244,14 +251,16 @@ impl MMU {
     }
 
     /// Check if any state in the MMU has been dirtied
+    #[must_use]
     pub fn dirtied(&self) -> bool {
-        self.data.iter().any(|d| d.dirtied())
+        self.data.iter().any(Mapping::dirtied)
     }
 
     /// Snapshot the entire MMU state
     ///
     /// This is basically just a clone but will clear dirty state of all mappings without reverting
     /// the memory.
+    #[must_use]
     pub fn snapshot(&mut self) -> Self {
         let pages = self.pages.clone();
         let mut data = Vec::with_capacity(self.data.len());

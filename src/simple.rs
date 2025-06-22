@@ -1,19 +1,30 @@
-use crate::{address::AddrRange, fault::Reason, Fault};
+use crate::{address::AddrRange, fault::Reason, Fault, permission::Perm};
 
+/// Specific memory range in a simple mapping.
+/// 
+/// Holds some amount of memory with all of it using the same memory permissions.
 pub struct SimpleMap {
     addr: usize,
+    perm: Perm,
     data: Box<[u8]>,
 }
 
 impl SimpleMap {
-    pub fn new(addr: usize, size: usize) -> Self {
+    /// Create a new mapping at the specified address with the given permissions and size.
+    pub fn new(addr: usize, size: usize, perm: Perm) -> Self {
         let data = vec![0u8; size];
         Self {
             addr,
+            perm,
             data: data.into_boxed_slice(),
         }
     }
 
+    /// Read some data from the mapping.
+    /// 
+    /// # Errors
+    /// - Not mapped error if the requested address is outside the contained memory range
+    /// - Fault if the memory does not have read permissions
     pub fn read(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         if addr < self.addr {
             return Err(Fault {
@@ -28,10 +39,20 @@ impl SimpleMap {
                 reason: Reason::NotMapped,
             });
         }
+        if !self.perm.read() {
+            return Err(Fault {
+                address: addr..addr+buf.len(),
+                reason: Reason::NotReadable,
+            });
+        }
         buf.copy_from_slice(&self.data[offset..][..buf.len()]);
         Ok(())
     }
-
+    /// Write some data into the mapping.
+    ///
+    /// # Errors
+    /// - Not mapped error if the requested address is outside the contained memory range
+    /// - Fault if the memory does not have read permissions
     pub fn write(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
         if addr < self.addr {
             return Err(Fault {
@@ -46,7 +67,13 @@ impl SimpleMap {
                 reason: Reason::NotMapped,
             });
         }
-        (self.data[offset..][..buf.len()]).copy_from_slice(buf);
+        if !self.perm.write() {
+            return Err(Fault {
+                address: addr..buf.len(),
+                reason: Reason::NotWritable,
+            });
+        }
+        self.data[offset..][..buf.len()].copy_from_slice(buf);
         Ok(())
     }
 }
@@ -66,7 +93,8 @@ impl AsMut<[u8]> for SimpleMap {
 /// Software memory management unit.
 ///
 /// This implementation is more representative of an actual MMU and applies a specific memory
-/// permission to an entire page. This implementation also does not 
+/// permission to an entire page. This implementation also does not support write before read
+/// permission that can be used by [`crate::MMU`].
 #[derive(Default)]
 pub struct MMUSimple {
     /// List of AddrRanges sorted by the lowest address in the range
@@ -102,7 +130,7 @@ impl MMUSimple {
     ///
     /// # Panics
     /// Panics if `size` is zero. This MMU does not support zero sized memory mappings.
-    pub fn map_memory(&mut self, start: usize, size: usize) -> Result<(), AddrRange> {
+    pub fn map_memory(&mut self, start: usize, size: usize, perm: Perm) -> Result<(), AddrRange> {
         assert!(size != 0, "Zero sized memory mappings are not supported");
         let end = start + size;
         // Loop through to make sure there isn't any overlap
@@ -114,7 +142,7 @@ impl MMUSimple {
             }
         }
         let new_range = AddrRange::new(start, size);
-        let map = SimpleMap::new(start, size);
+        let map = SimpleMap::new(start, size, perm);
         self.pages.push(new_range);
         self.data.push(map);
         self.pages.sort();

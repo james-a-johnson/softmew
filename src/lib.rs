@@ -105,11 +105,6 @@ impl MMU {
     #[must_use]
     #[inline]
     pub fn get_mapping(&self, addr: usize) -> Option<&Mapping> {
-        debug_assert!(self.pages.is_sorted(), "Pages list is not sorted");
-        debug_assert!(
-            self.data.is_sorted_by(|d1, d2| d1.addr < d2.addr),
-            "Memory mappings are not sorted"
-        );
         let idx = self.get_mapping_idx(addr)?;
         // SAFETY: See safety comment in get_mapping_mut
         Some(unsafe { self.data.get_unchecked(idx) })
@@ -121,11 +116,6 @@ impl MMU {
     #[must_use]
     #[inline]
     pub fn get_mapping_mut(&mut self, addr: usize) -> Option<&mut Mapping> {
-        debug_assert!(self.pages.is_sorted(), "Pages list is not sorted");
-        debug_assert!(
-            self.data.is_sorted_by(|d1, d2| d1.addr < d2.addr),
-            "Memory mappings are not sorted"
-        );
         let idx = self.get_mapping_idx(addr)?;
         // SAFETY: idx is returned by get_mapping_idx which will return a valid index into the pages
         // vector. The pages and data vectors are always kept in sync so a valid page index is
@@ -136,6 +126,16 @@ impl MMU {
     #[must_use]
     #[inline]
     fn get_mapping_idx(&self, addr: usize) -> Option<usize> {
+        debug_assert!(self.pages.is_sorted(), "Pages list is not sorted");
+        debug_assert!(
+            self.data.is_sorted_by(|d1, d2| d1.addr < d2.addr),
+            "Memory mappings are not sorted"
+        );
+        debug_assert_eq!(
+            self.pages.len(),
+            self.data.len(),
+            "Data and pages have differing sizes"
+        );
         self.pages
             .binary_search_by(|map| map.compare_to_addr(addr))
             .ok()

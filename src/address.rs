@@ -34,6 +34,7 @@ impl AddrRange {
 
     /// Compares this address range to a specific address.
     #[inline]
+    #[must_use]
     pub fn compare_to_addr(&self, addr: usize) -> Ordering {
         if self.contains(addr) {
             Ordering::Equal

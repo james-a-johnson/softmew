@@ -11,6 +11,7 @@ pub struct SimpleMap {
 
 impl SimpleMap {
     /// Create a new mapping at the specified address with the given permissions and size.
+    #[must_use]
     pub fn new(addr: usize, size: usize, perm: Perm) -> Self {
         let data = vec![0u8; size];
         Self {
@@ -97,7 +98,7 @@ impl AsMut<[u8]> for SimpleMap {
 /// permission that can be used by [`crate::MMU`].
 #[derive(Default)]
 pub struct MMUSimple {
-    /// List of AddrRanges sorted by the lowest address in the range
+    /// List of `AddrRanges` sorted by the lowest address in the range
     ///
     /// Must always remain sorted or else everything will break. It is assumed that an element at
     /// index `i` in pages is the address range for the backing memory at index `i` in data.

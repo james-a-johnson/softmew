@@ -186,6 +186,7 @@ impl Mapping {
     ///
     /// Returns a copy of all of the memory and permissions. This is essentially just a clone but
     /// will clear all of the dirty state tracking.
+    #[must_use]
     pub fn snapshot(&mut self) -> Self {
         self.dirty.clear();
         self.dirty_flag[..].fill(0);

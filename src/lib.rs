@@ -7,6 +7,7 @@ use crate::fault::Reason;
 pub mod address;
 pub mod map;
 pub mod fault;
+pub mod simple;
 
 /// Software memory management unit
 ///
@@ -121,7 +122,7 @@ impl MMU {
     /// # Panics
     /// Panics if `size` is zero. This MMU does not support zero sized memory mappings.
     pub fn map_memory(&mut self, start: usize, size: usize, perm: Perm) -> Result<(), AddrRange> {
-        assert!(size != 0, "Zero sized memory mappings are not supported");
+        assert_ne!(size, 0, "Zero sized memory mappings are not supported");
         let end = start + size;
         // Loop through to make sure there isn't any overlap
         for map in &self.pages {

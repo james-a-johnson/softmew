@@ -1,6 +1,6 @@
-use std::fmt::{Debug, Formatter};
 use crate::fault::{Fault, Reason};
 use crate::permission::Perm;
+use std::fmt::{Debug, Formatter};
 use std::ops::Range;
 
 /// This will control the size of a dirty block
@@ -13,8 +13,6 @@ use std::ops::Range;
 /// A large value for this means that only a few expensive memcopies will need to be made. A
 /// smaller value means a lot more cheap memcopies will be made.
 const PAGE_SIZE: usize = 64;
-
-
 
 /// Memory mapping with byte level permissions
 ///
@@ -36,7 +34,12 @@ pub struct Mapping {
 
 impl Debug for Mapping {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Mapping ({:08X}, {:08X})", self.addr, self.addr + self.data.len())
+        write!(
+            f,
+            "Mapping ({:08X}, {:08X})",
+            self.addr,
+            self.addr + self.data.len()
+        )
     }
 }
 
@@ -61,6 +64,10 @@ impl Mapping {
         let mut perms = Vec::with_capacity(len);
         let dirty = Vec::with_capacity(dirty_len);
         let mut dirty_flag = Vec::with_capacity(dirty_flag_len);
+        // SAFETY: All of these vectors have the correct capacity set and any data will already in
+        // the backing memory is a valid representation of an u8 or u64 or usize. Additionally,
+        // all of this vectors will be immediately initialized afterward to be filled with correct
+        // default data.
         unsafe {
             data.set_len(len);
             perms.set_len(len);
@@ -69,7 +76,13 @@ impl Mapping {
         data[..].fill(0);
         perms[..].fill(perm);
         dirty_flag[..].fill(0);
-        Self { data: data.into_boxed_slice(), perms: perms.into_boxed_slice(), dirty, dirty_flag: dirty_flag.into_boxed_slice(), addr }
+        Self {
+            data: data.into_boxed_slice(),
+            perms: perms.into_boxed_slice(),
+            dirty,
+            dirty_flag: dirty_flag.into_boxed_slice(),
+            addr,
+        }
     }
 
     /// Access the backing array of data
@@ -118,9 +131,10 @@ impl Mapping {
                 reason: Reason::NotMapped,
             });
         }
-        let perms = unsafe {
-            self.perms.get_unchecked(offset_range.clone())
-        };
+        // SAFETY: The perms vector is kept in sync with the data range. Above, we've checked that it
+        // is a valid range for the data vector. So we can safely use it here to index into the
+        // permissions vector.
+        let perms = unsafe { self.perms.get_unchecked(offset_range.clone()) };
         if !perms.iter().all(|p| *p & perm == perm) {
             return Err(Fault {
                 address: addrs.clone(),
@@ -130,7 +144,11 @@ impl Mapping {
         Ok(offset_range)
     }
 
-    fn check_perm_write(&self, addrs: Range<usize>, perm: Perm) -> Result<(Range<usize>, bool), Fault> {
+    fn check_perm_write(
+        &self,
+        addrs: Range<usize>,
+        perm: Perm,
+    ) -> Result<(Range<usize>, bool), Fault> {
         if addrs.start < self.addr {
             return Err(Fault {
                 address: addrs.clone(),
@@ -144,15 +162,16 @@ impl Mapping {
                 reason: Reason::NotMapped,
             });
         }
-        let perms = unsafe {
-            self.perms.get_unchecked(offset_range.clone())
-        };
+        // SAFETY: See the safety comment from check_perm
+        let perms = unsafe { self.perms.get_unchecked(offset_range.clone()) };
         let mut write = Perm::WRITE;
         let mut raw = Perm::NONE;
         for p in perms {
             write &= *p;
             raw |= *p;
-            if !write.write() { break; }
+            if !write.write() {
+                break;
+            }
         }
         if !write.write() {
             return Err(Fault {
@@ -174,7 +193,7 @@ impl Mapping {
         let perms = self.perms.clone();
         let dirty = Vec::with_capacity(self.dirty.capacity());
         let dirty_flag = self.dirty_flag.clone();
-        Self{
+        Self {
             data,
             perms,
             dirty,
@@ -200,7 +219,8 @@ impl Mapping {
     /// In the case of an error, no bytes of `buf` will be written and it will be left the same
     /// value as when it was passed to the function.
     pub fn read_perm(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
-        let offset = self.check_perm(addr..addr+buf.len(), Perm::READ)?;
+        let offset = self.check_perm(addr..addr + buf.len(), Perm::READ)?;
+        // SAFETY: check_perm will return a valid range to index into the data array.
         let accessed_data = unsafe { self.data.get_unchecked(offset) };
         buf.copy_from_slice(accessed_data);
         Ok(())
@@ -226,11 +246,14 @@ impl Mapping {
     /// In the case of an error, no bytes of `buf` will be written and it will be left the same
     /// value as when it was passed to the function.
     pub fn write_perm(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
-        let (offset, has_raw) = self.check_perm_write(addr..addr+buf.len(), Perm::WRITE)?;
+        let (offset, has_raw) = self.check_perm_write(addr..addr + buf.len(), Perm::WRITE)?;
+        // SAFETY: check_perm_write will return a range that is safe to index into the data vector.
         let accessed_data = unsafe { self.data.get_unchecked_mut(offset.clone()) };
         accessed_data.copy_from_slice(buf);
         // Optimize and assume that if any of the bytes have RAW set then all of them have RAW set
         if has_raw {
+            // SAFETY: The offset range is safe for the data vector. Since the perms and data vector
+            // always have the same shape, it is safe to use it to index into the perms array.
             let perms_to_set = unsafe { self.perms.get_unchecked_mut(offset.clone()) };
             for p in perms_to_set {
                 *p |= Perm::READ;
@@ -257,7 +280,8 @@ impl Mapping {
     /// # Errors
     /// Same as [`Mapping::read_perm`]
     pub fn fetch_perm(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
-        let offset = self.check_perm(addr..addr+buf.len(), Perm::EXEC)?;
+        let offset = self.check_perm(addr..addr + buf.len(), Perm::EXEC)?;
+        // SAFETY: check_perm returns a valid index for the data vector.
         let accessed_data = unsafe { self.data.get_unchecked(offset) };
         buf.copy_from_slice(accessed_data);
         Ok(())
@@ -267,15 +291,23 @@ impl Mapping {
     ///
     /// This function assumes that the snapshot state has not changed since it was cloned from.
     ///
+    /// # Safety
+    /// This function requires that `original` is a mapping that comes from snapshotting this
+    /// mapping.
+    ///
     /// # Panics
     /// If `original` is not a clone of this mapping then this may panic.
-    pub(crate) fn reset(&mut self, original: &Self) {
+    pub(crate) unsafe fn reset(&mut self, original: &Self) {
         // Memory may not be a multiple of the page size. Need to make sure we don't address past
         // the end of the last page.
         let max_addr = self.data.len();
         for block in &self.dirty {
             let start = block * PAGE_SIZE;
             let end = max_addr.min((block + 1) * PAGE_SIZE);
+
+            // SAFETY: This function is unsafe because it requries that original is a snapshot
+            // of this memory mapping. Knowing that information, all of these ranges will have
+            // been made by accesses to this memory which will make the indexing valid.
 
             // Copy data over
             let my_data = unsafe { self.data.get_unchecked_mut(start..end) };
@@ -317,13 +349,20 @@ mod test {
         map.write_perm(0x10f, data).expect("Failed first write");
         map.write_perm(0x409e, data).expect("Failed second write");
         let snapshot = map.snapshot();
-        map.write_perm(0x10f, data2).expect("Failed first overwrite");
-        map.write_perm(0x409e, data3).expect("Failed second overwrite");
-        map.reset(&snapshot);
+        map.write_perm(0x10f, data2)
+            .expect("Failed first overwrite");
+        map.write_perm(0x409e, data3)
+            .expect("Failed second overwrite");
+        // SAFETY: snapshot is a snapshot of map so it's safe to use here.
+        unsafe {
+            map.reset(&snapshot);
+        }
         let mut buffer = [0u8; 6];
-        map.read_perm(0x10f, &mut buffer).expect("Failed first read");
+        map.read_perm(0x10f, &mut buffer)
+            .expect("Failed first read");
         assert_eq!(&buffer[..], data);
-        map.read_perm(0x409e, &mut buffer).expect("Failed second read");
+        map.read_perm(0x409e, &mut buffer)
+            .expect("Failed second read");
         assert_eq!(&buffer[..], data);
     }
 
@@ -337,23 +376,27 @@ mod test {
             }
         }
         let mut buffer = [0u8; 10];
-        map.read_perm(0x100, &mut buffer).expect("Failed to read data");
+        map.read_perm(0x100, &mut buffer)
+            .expect("Failed to read data");
         assert_eq!(&buffer, b"hello\x00\x00\x00\x00\x00");
     }
 
     #[test]
     fn write() {
         let mut map = Mapping::new(0x100, 0x100);
-        map.write_perm(0x100, b"hello").expect("Failed to write data");
+        map.write_perm(0x100, b"hello")
+            .expect("Failed to write data");
         assert_eq!(&map.data[0..10], b"hello\x00\x00\x00\x00\x00");
     }
 
     #[test]
     fn raw() {
         let mut map = Mapping::new_perm(0x100, 0x100, Perm::RAW | Perm::WRITE);
-        map.write_perm(0x105, b"hello").expect("Failed to write data");
+        map.write_perm(0x105, b"hello")
+            .expect("Failed to write data");
         let mut data = [0u8; 5];
-        map.read_perm(0x105, &mut data).expect("Failed to read RAW mapped data");
+        map.read_perm(0x105, &mut data)
+            .expect("Failed to read RAW mapped data");
         assert_eq!(&data[..], b"hello");
     }
 
@@ -365,7 +408,8 @@ mod test {
             data[10..21].copy_from_slice(b"instruction");
         }
         let mut buffer = [0u8; 11];
-        map.fetch_perm(0x10a, &mut buffer).expect("Failed to fetch instruction data");
+        map.fetch_perm(0x10a, &mut buffer)
+            .expect("Failed to fetch instruction data");
         assert_eq!(&buffer[..], b"instruction");
     }
 

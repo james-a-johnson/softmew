@@ -1,5 +1,5 @@
-use std::ops::Range;
 use std::cmp::Ordering;
+use std::ops::Range;
 
 /// Range of virtual addresses
 ///
@@ -31,7 +31,7 @@ impl AddrRange {
     pub fn contains(&self, addr: usize) -> bool {
         self.start <= addr && addr < self.end
     }
-    
+
     /// Compares this address range to a specific address.
     #[inline]
     pub fn compare_to_addr(&self, addr: usize) -> Ordering {

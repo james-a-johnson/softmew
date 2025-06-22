@@ -1,4 +1,4 @@
-use crate::{address::AddrRange, fault::Reason, Fault, permission::Perm, Memory};
+use crate::{address::AddrRange, fault::Reason, permission::Perm, Fault, Memory};
 
 /// Specific memory range in a simple mapping.
 ///
@@ -28,20 +28,20 @@ impl SimpleMap {
     pub fn read(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         if addr < self.addr {
             return Err(Fault {
-                address: addr..addr+buf.len(),
+                address: addr..addr + buf.len(),
                 reason: Reason::NotMapped,
             });
         }
         let offset = addr - self.addr;
         if offset + buf.len() > self.data.len() {
             return Err(Fault {
-                address: addr..addr+buf.len(),
+                address: addr..addr + buf.len(),
                 reason: Reason::NotMapped,
             });
         }
         if !self.perm.read() {
             return Err(Fault {
-                address: addr..addr+buf.len(),
+                address: addr..addr + buf.len(),
                 reason: Reason::NotReadable,
             });
         }
@@ -56,14 +56,14 @@ impl SimpleMap {
     pub fn write(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
         if addr < self.addr {
             return Err(Fault {
-                address: addr..addr+buf.len(),
+                address: addr..addr + buf.len(),
                 reason: Reason::NotMapped,
             });
         }
         let offset = addr - self.addr;
         if offset + buf.len() > self.data.len() {
             return Err(Fault {
-                address: addr..addr+buf.len(),
+                address: addr..addr + buf.len(),
                 reason: Reason::NotMapped,
             });
         }
@@ -132,7 +132,12 @@ impl MMUSimple {
     ///
     /// # Panics
     /// Panics if `size` is zero. This MMU does not support zero sized memory mappings.
-    pub fn map_memory(&mut self, start: usize, size: usize, perm: Perm) -> Result<&mut SimpleMap, AddrRange> {
+    pub fn map_memory(
+        &mut self,
+        start: usize,
+        size: usize,
+        perm: Perm,
+    ) -> Result<&mut SimpleMap, AddrRange> {
         assert!(size != 0, "Zero sized memory mappings are not supported");
         let end = start + size;
         // Loop through to make sure there isn't any overlap
@@ -162,10 +167,16 @@ impl MMUSimple {
     #[must_use]
     pub fn get_mapping(&self, addr: usize) -> Option<&SimpleMap> {
         debug_assert!(self.pages.is_sorted(), "Pages list is not sorted");
-        debug_assert!(self.data.is_sorted_by(|d1, d2| d1.addr < d2.addr), "Memory mappings are not sorted");
+        debug_assert!(
+            self.data.is_sorted_by(|d1, d2| d1.addr < d2.addr),
+            "Memory mappings are not sorted"
+        );
         for (i, map) in self.pages.iter().enumerate() {
             if map.contains(addr) {
-                return Some(unsafe { self.data.get_unchecked(i) })
+                // SAFETY: The pages and data vectors will always be kept in sync. So a valid index
+                // for the pages vector will be a valid index for the data vector. i is a valid
+                // index into pages so it will be a valid index into data.
+                return Some(unsafe { self.data.get_unchecked(i) });
             }
         }
         None
@@ -177,10 +188,14 @@ impl MMUSimple {
     #[must_use]
     pub fn get_mapping_mut(&mut self, addr: usize) -> Option<&mut SimpleMap> {
         debug_assert!(self.pages.is_sorted(), "Pages list is not sorted");
-        debug_assert!(self.data.is_sorted_by(|d1, d2| d1.addr < d2.addr), "Memory mappings are not sorted");
+        debug_assert!(
+            self.data.is_sorted_by(|d1, d2| d1.addr < d2.addr),
+            "Memory mappings are not sorted"
+        );
         for (i, map) in self.pages.iter().enumerate() {
             if map.contains(addr) {
-                return Some(unsafe { self.data.get_unchecked_mut(i) })
+                // SAFETY: See safety comment in `get_mapping`
+                return Some(unsafe { self.data.get_unchecked_mut(i) });
             }
         }
         None
@@ -196,7 +211,7 @@ impl MMUSimple {
     /// returned by the underlying [`Mapping`].
     pub fn read(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         let map = self.get_mapping(addr).ok_or(Fault {
-            address: addr..addr+buf.len(),
+            address: addr..addr + buf.len(),
             reason: Reason::NotMapped,
         })?;
         map.read(addr, buf)
@@ -213,7 +228,7 @@ impl MMUSimple {
     /// returned by the underlying [`Mapping`].
     pub fn write(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
         let map = self.get_mapping_mut(addr).ok_or(Fault {
-            address: addr..addr+buf.len(),
+            address: addr..addr + buf.len(),
             reason: Reason::NotMapped,
         })?;
         map.write(addr, buf)
@@ -224,7 +239,7 @@ impl Memory for MMUSimple {
     fn read(&self, addr: usize, data: &mut [u8]) -> Result<(), Fault> {
         self.read(addr, data)
     }
-    
+
     fn write(&mut self, addr: usize, data: &[u8]) -> Result<(), Fault> {
         self.write(addr, data)
     }

@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Formatter};
 use crate::fault::{Fault, Reason};
 use crate::permission::Perm;
 use std::ops::Range;
@@ -31,6 +32,12 @@ pub struct Mapping {
     dirty: Vec<usize>,
     dirty_flag: Vec<u64>,
     pub addr: usize,
+}
+
+impl Debug for Mapping {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Mapping ({:08X}, {:08X})", self.addr, self.addr + self.data.len())
+    }
 }
 
 impl Mapping {

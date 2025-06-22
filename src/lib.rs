@@ -113,7 +113,9 @@ impl MMU {
         None
     }
 
-    /// Create a new memory mapping of the address range [start, size+1) with the given permission
+    /// Create a new memory mapping of the address range [start, size+1) with the given permission.
+    /// 
+    /// Returns a mutable reference to the newly created mapping so that it can be initialized.
     ///
     /// # Errors
     /// Returns an error if any of the address ranges that are already mapped would overlap with
@@ -122,7 +124,7 @@ impl MMU {
     ///
     /// # Panics
     /// Panics if `size` is zero. This MMU does not support zero sized memory mappings.
-    pub fn map_memory(&mut self, start: usize, size: usize, perm: Perm) -> Result<(), AddrRange> {
+    pub fn map_memory(&mut self, start: usize, size: usize, perm: Perm) -> Result<&mut Mapping, AddrRange> {
         assert_ne!(size, 0, "Zero sized memory mappings are not supported");
         let end = start + size;
         // Loop through to make sure there isn't any overlap
@@ -139,7 +141,8 @@ impl MMU {
         self.data.push(new_mapping);
         self.pages.sort();
         self.data.sort_by(|m1, m2| m1.addr.cmp(&m2.addr));
-        Ok(())
+        // This cannot panic because we just inserted the mapping that we're requesting.
+        Ok(self.get_mapping_mut(start).unwrap())
     }
 
     /// Reads some memory in this MMU's memory space

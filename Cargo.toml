@@ -25,3 +25,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "reset"
 harness = false
+
+[[bench]]
+name = "write"
+harness = false

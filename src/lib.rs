@@ -1,34 +1,13 @@
 use crate::address::AddrRange;
 pub use crate::fault::Fault;
 use crate::fault::Reason;
-use crate::map::Mapping;
+use crate::page::{Page, SnapshotPage};
 pub use crate::permission::Perm;
 
 pub mod address;
 pub mod fault;
-pub mod map;
+pub mod page;
 pub mod permission;
-pub mod simple;
-
-/// Collection of methods that are supported by all types of MMUs.
-pub trait Memory {
-    /// Read data from address into a buffer.
-    ///
-    /// This read will respect all permissions set on the memory.
-    ///
-    /// # Errors
-    /// Can error for an invalid address or missing read permissions on the data.
-    /// See [`Reason`] for the potential causes of an error.
-    fn read(&self, addr: usize, data: &mut [u8]) -> Result<(), Fault>;
-
-    /// Write data from buffer to specified address.
-    ///
-    /// Respects all permissions set on memory.
-    /// # Errors
-    /// Can error for an invalid address or missing write permissions on the data.
-    /// See [`Reason`] for the potential causes of an error.
-    fn write(&mut self, addr: usize, data: &[u8]) -> Result<(), Fault>;
-}
 
 /// Software memory management unit
 ///
@@ -51,14 +30,15 @@ pub trait Memory {
 /// ```
 /// use softmew::MMU;
 /// use softmew::permission::Perm;
+/// use softmew::page::{Page, SnapshotPage};
 ///
-/// # fn use_mmu(_mew: &mut MMU) {}
+/// # fn use_mmu<P: Page>(_mew: &mut MMU<P>) {}
 ///
-/// let mut memory = MMU::new();
+/// let mut memory = MMU::<SnapshotPage>::new();
 /// let data = memory.map_memory(0x1000, 0x1000, Perm::default()).expect("Failed to map data section");
-/// data.data_mut()[..8].copy_from_slice(&[0, 1, 2, 3, 4, 5, 6, 7]);
+/// data.as_mut()[..8].copy_from_slice(&[0, 1, 2, 3, 4, 5, 6, 7]);
 /// let code = memory.map_memory(0x8000, 0x1000, Perm::READ | Perm::EXEC).expect("Failed to map code section");
-/// code.data_mut()[..8].copy_from_slice(&[8, 9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf]);
+/// code.as_mut()[..8].copy_from_slice(&[8, 9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf]);
 ///
 /// // Make a snapshot
 /// let snapshot = memory.snapshot();
@@ -70,8 +50,7 @@ pub trait Memory {
 /// // snapshot is a snapshot of memory so it is safe to use here
 /// unsafe { memory.reset(&snapshot); }
 /// ```
-#[derive(Default)]
-pub struct MMU {
+pub struct MMU<P> {
     /// List of `AddrRanges` sorted by the lowest address in the range
     ///
     /// Must always remain sorted or else everything will break. It is assumed that an element at
@@ -81,10 +60,10 @@ pub struct MMU {
     ///
     /// This must always be sorted by the address at which the memory is mapped at. This will
     /// ensure that it is always sorted in the same way as pages.
-    data: Vec<Mapping>,
+    data: Vec<P>,
 }
 
-impl MMU {
+impl<P: Page> MMU<P> {
     /// Create a new memory management instance
     ///
     /// Will have no memory associated with it.
@@ -98,13 +77,13 @@ impl MMU {
 
     /// Get the mapping associated with an address
     ///
-    /// Looks through all of the mapped memory to find any that contain `addr` and returns a
+    /// Looks through all mapped memory to find any that contain `addr` and returns a
     /// reference to that mapping.
     ///
     /// If no mapping is found, None is returned.
     #[must_use]
     #[inline]
-    pub fn get_mapping(&self, addr: usize) -> Option<&Mapping> {
+    pub fn get_mapping(&self, addr: usize) -> Option<&P> {
         let idx = self.get_mapping_idx(addr)?;
         // SAFETY: See safety comment in get_mapping_mut
         Some(unsafe { self.data.get_unchecked(idx) })
@@ -115,7 +94,7 @@ impl MMU {
     /// Same as [`MMU::get_mapping`] but will get a mutable reference.
     #[must_use]
     #[inline]
-    pub fn get_mapping_mut(&mut self, addr: usize) -> Option<&mut Mapping> {
+    pub fn get_mapping_mut(&mut self, addr: usize) -> Option<&mut P> {
         let idx = self.get_mapping_idx(addr)?;
         // SAFETY: idx is returned by get_mapping_idx which will return a valid index into the pages
         // vector. The pages and data vectors are always kept in sync so a valid page index is
@@ -128,7 +107,7 @@ impl MMU {
     fn get_mapping_idx(&self, addr: usize) -> Option<usize> {
         debug_assert!(self.pages.is_sorted(), "Pages list is not sorted");
         debug_assert!(
-            self.data.is_sorted_by(|d1, d2| d1.addr < d2.addr),
+            self.data.is_sorted_by(|d1, d2| d1.start() < d2.start()),
             "Memory mappings are not sorted"
         );
         debug_assert_eq!(
@@ -157,7 +136,7 @@ impl MMU {
         start: usize,
         size: usize,
         perm: Perm,
-    ) -> Result<&mut Mapping, AddrRange> {
+    ) -> Result<&mut P, AddrRange> {
         assert_ne!(size, 0, "Zero sized memory mappings are not supported");
         let end = start + size;
         // Loop through to make sure there isn't any overlap
@@ -168,12 +147,12 @@ impl MMU {
                 return Err(*map);
             }
         }
-        let new_mapping = Mapping::new_perm(start, size, perm);
+        let new_mapping = P::new(start, size, perm);
         let new_range = AddrRange::new(start, size);
         self.pages.push(new_range);
         self.data.push(new_mapping);
         self.pages.sort();
-        self.data.sort_by(|m1, m2| m1.addr.cmp(&m2.addr));
+        self.data.sort_by(|m1, m2| m1.start().cmp(&m2.start()));
         // This cannot panic because we just inserted the mapping that we're requesting.
         Ok(self.get_mapping_mut(start).unwrap())
     }
@@ -181,53 +160,38 @@ impl MMU {
     /// Reads some memory in this MMU's memory space
     ///
     /// This is a simple wrapper around finding the correct memory space using [`MMU::get_mapping`]
-    /// and then calling [`Mapping::read_perm`] on the returned mapping.
+    /// and then calling [`SnapshotPage::read_perm`] on the returned mapping.
     ///
     /// # Errors
     /// Returns an error if `addr` is not mapped in this MMU. Will also propagate the fault
-    /// returned by the underlying [`Mapping`].
+    /// returned by the underlying [`SnapshotPage`].
     pub fn read_perm(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         let map = self.get_mapping(addr).ok_or(Fault {
             address: addr..addr + buf.len(),
             reason: Reason::NotMapped,
         })?;
-        map.read_perm(addr, buf)
+        map.read(addr, buf)
     }
 
     /// Writes some memory in this MMU's memory space
     ///
     /// This is a simple wrapper around finding the correct memory space using
     /// [`MMU::get_mapping_mut`]
-    /// and then calling [`Mapping::write_perm`] on the returned mapping.
+    /// and then calling [`SnapshotPage::write_perm`] on the returned mapping.
     ///
     /// # Errors
     /// Returns an error if `addr` is not mapped in this MMU. Will also propagate the fault
-    /// returned by the underlying [`Mapping`].
+    /// returned by the underlying [`SnapshotPage`].
     pub fn write_perm(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
         let map = self.get_mapping_mut(addr).ok_or(Fault {
             address: addr..addr + buf.len(),
             reason: Reason::NotMapped,
         })?;
-        map.write_perm(addr, buf)
+        map.write(addr, buf)
     }
+}
 
-    /// Fetches some memory for execution in this MMU's memory space
-    ///
-    /// This is a simple wrapper around finding the correct memory space using
-    /// [`MMU::get_mapping`]
-    /// and then calling [`Mapping::fetch_perm`] on the returned mapping.
-    ///
-    /// # Errors
-    /// Returns an error if `addr` is not mapped in this MMU. Will also propagate the fault
-    /// returned by the underlying [`Mapping`].
-    pub fn fetch_perm(&mut self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
-        let map = self.get_mapping(addr).ok_or(Fault {
-            address: addr..addr + buf.len(),
-            reason: Reason::NotMapped,
-        })?;
-        map.fetch_perm(addr, buf)
-    }
-
+impl MMU<SnapshotPage> {
     /// Reset all memory to some snapshotted state
     ///
     /// Resets all of the memory in this MMU to the state that it was at when `original` was cloned
@@ -253,7 +217,7 @@ impl MMU {
     /// Check if any state in the MMU has been dirtied
     #[must_use]
     pub fn dirtied(&self) -> bool {
-        self.data.iter().any(Mapping::dirtied)
+        self.data.iter().any(SnapshotPage::dirtied)
     }
 
     /// Snapshot the entire MMU state
@@ -271,23 +235,14 @@ impl MMU {
     }
 }
 
-impl Memory for MMU {
-    fn read(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
-        self.read_perm(addr, buf)
-    }
-
-    fn write(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
-        self.write_perm(addr, buf)
-    }
-}
-
 #[cfg(test)]
 mod test {
+    use crate::page::SimplePage;
     use super::*;
 
     #[test]
     fn overlapping() {
-        let mut mew = MMU::new();
+        let mut mew = MMU::<SnapshotPage>::new();
         let expected = AddrRange::new(0x100, 0x100);
         mew.map_memory(0x100, 0x100, Perm::default())
             .expect("Failed to map first memory region");
@@ -320,7 +275,7 @@ mod test {
 
     #[test]
     fn get() {
-        let mut mew = MMU::new();
+        let mut mew = MMU::<SnapshotPage>::new();
         mew.map_memory(0x1000, 0x1000, Perm::default()).unwrap();
         mew.map_memory(0x8000, 0x1000, Perm::default()).unwrap();
         {
@@ -350,7 +305,7 @@ mod test {
 
     #[test]
     fn raw() {
-        let mut mew = MMU::new();
+        let mut mew = MMU::<SimplePage>::new();
         let _data = mew
             .map_memory(0xaf00, 0x8000, Perm::WRITE | Perm::RAW)
             .unwrap();

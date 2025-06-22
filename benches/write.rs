@@ -1,10 +1,11 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::hint::black_box;
 
+use softmew::page::SnapshotPage;
 use softmew::{permission::Perm, MMU};
 
 fn write_lots_of_ranges(c: &mut Criterion) {
-    let mut mew = MMU::new();
+    let mut mew = MMU::<SnapshotPage>::new();
     for i in 0..256 {
         mew.map_memory(0x1000 + 0x100 * i, 0x80, Perm::default())
             .unwrap();
@@ -16,7 +17,7 @@ fn write_lots_of_ranges(c: &mut Criterion) {
 }
 
 fn write_few_ranges(c: &mut Criterion) {
-    let mut mew = MMU::new();
+    let mut mew = MMU::<SnapshotPage>::new();
     for i in 0..4 {
         mew.map_memory(0x1000 + 0x100 * i, 0x80, Perm::default())
             .unwrap();

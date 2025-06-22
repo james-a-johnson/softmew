@@ -3,8 +3,9 @@ use std::hint::black_box;
 
 use softmew::permission::Perm;
 use softmew::MMU;
+use softmew::page::SnapshotPage;
 
-fn write_and_reset(mew: &mut MMU, orig: &MMU) {
+fn write_and_reset(mew: &mut MMU<SnapshotPage>, orig: &MMU<SnapshotPage>) {
     mew.write_perm(0x1080, b"alfalfa sprouts").unwrap();
     mew.write_perm(0x10080, b"howdy do").unwrap();
     mew.write_perm(0x17000, b"memory write").unwrap();

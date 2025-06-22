@@ -1,7 +1,7 @@
 [package]
 name = "softmew"
-version = "0.3.0"
-edition = "2021"
+version = "0.4.0"
+edition = "2024"
 
 [lib]
 crate-type = ["staticlib", "rlib"]
@@ -20,7 +20,7 @@ panic = "abort"
 [dependencies]
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.6.0", features = ["html_reports"] }
 
 [[bench]]
 name = "reset"

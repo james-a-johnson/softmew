@@ -63,6 +63,15 @@ pub struct MMU<P> {
     data: Vec<P>,
 }
 
+impl<P> Default for MMU<P> {
+    fn default() -> Self {
+        Self {
+            pages: Vec::new(),
+            data: Vec::new(),
+        }
+    }
+}
+
 impl<P: Page> MMU<P> {
     /// Create a new memory management instance
     ///
@@ -152,7 +161,7 @@ impl<P: Page> MMU<P> {
         self.pages.push(new_range);
         self.data.push(new_mapping);
         self.pages.sort();
-        self.data.sort_by(|m1, m2| m1.start().cmp(&m2.start()));
+        self.data.sort_by_key(|m| m.start());
         // This cannot panic because we just inserted the mapping that we're requesting.
         Ok(self.get_mapping_mut(start).unwrap())
     }

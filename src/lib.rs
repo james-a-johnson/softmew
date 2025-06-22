@@ -161,7 +161,7 @@ impl<P: Page> MMU<P> {
         self.pages.push(new_range);
         self.data.push(new_mapping);
         self.pages.sort();
-        self.data.sort_by_key(|m| m.start());
+        self.data.sort_by_key(Page::start);
         // This cannot panic because we just inserted the mapping that we're requesting.
         Ok(self.get_mapping_mut(start).unwrap())
     }

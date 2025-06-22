@@ -1,5 +1,5 @@
 use crate::address::AddrRange;
-pub use crate::map::Mapping;
+use crate::map::Mapping;
 pub use crate::fault::Fault;
 pub use crate::permission::Perm;
 use crate::fault::Reason;

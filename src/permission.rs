@@ -30,8 +30,7 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 /// that memory will be write only. Any attempt to read or execute from that memory will
 /// cause a fault.
 ///
-/// Additionally, execute only memory is not readable. Any attempt to read it that isn't
-/// an instruction fetch (via [`Mapping::fetch_perm`]) will cause a fault.
+/// Additionally, execute only memory is not readable. Any attempt to read it  will cause a fault.
 #[repr(transparent)]
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Perm(u8);

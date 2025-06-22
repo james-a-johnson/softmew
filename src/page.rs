@@ -65,8 +65,8 @@ pub trait Page: AsMut<[u8]> {
 /// One unique features of this page type is that it supports creating snapshots. This allows for
 /// very quickly reverting to a previous state of the memory.
 ///
-/// When accessing memory with any of [`SnapshotPage::read_perm`], [`SnapshotPage::write_perm`], or
-/// [`SnapshotPage::fetch_perm`], the permissions for each byte that is accessed will be checked.
+/// When accessing memory with [`SnapshotPage::read`] or [`SnapshotPage::write`]
+/// the permissions for each byte that is accessed will be checked.
 pub struct SnapshotPage {
     data: Box<[u8]>,
     perms: Box<[Perm]>,
@@ -237,12 +237,20 @@ impl SnapshotPage {
 }
 
 impl AsRef<[u8]> for SnapshotPage {
+    /// Get the backing data for the page as a slice of bytes.
+    ///
+    /// This allows you to read all the data in the page without worrying about any permissions
+    /// or having to go through the read method.
     fn as_ref(&self) -> &[u8] {
         self.data.as_ref()
     }
 }
 
 impl AsMut<[u8]> for SnapshotPage {
+    /// Get the backing data for the page as a slice of bytes.
+    ///
+    /// This allows you to modify the bytes in the page without worrying about permissions or going
+    /// through the write api. This is what should be used to initialize the data to specific values.
     fn as_mut(&mut self) -> &mut [u8] {
         self.data.as_mut()
     }
@@ -377,12 +385,20 @@ impl SimplePage {
 }
 
 impl AsRef<[u8]> for SimplePage {
+    /// Get the backing data for the page as a slice of bytes.
+    ///
+    /// This allows you to read all the data in the page without worrying about any permissions
+    /// or having to go through the read method.
     fn as_ref(&self) -> &[u8] {
         self.data.as_ref()
     }
 }
 
 impl AsMut<[u8]> for SimplePage {
+    /// Get the backing data for the page as a slice of bytes.
+    ///
+    /// This allows you to modify the bytes in the page without worrying about permissions or going
+    /// through the write api. This is what should be used to initialize the data to specific values.
     fn as_mut(&mut self) -> &mut [u8] {
         self.data.as_mut()
     }

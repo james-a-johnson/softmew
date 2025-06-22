@@ -160,7 +160,7 @@ impl<P: Page> MMU<P> {
     /// Reads some memory in this MMU's memory space
     ///
     /// This is a simple wrapper around finding the correct memory space using [`MMU::get_mapping`]
-    /// and then calling [`SnapshotPage::read_perm`] on the returned mapping.
+    /// and then calling [`Page::read`] on the returned mapping.
     ///
     /// # Errors
     /// Returns an error if `addr` is not mapped in this MMU. Will also propagate the fault
@@ -177,7 +177,7 @@ impl<P: Page> MMU<P> {
     ///
     /// This is a simple wrapper around finding the correct memory space using
     /// [`MMU::get_mapping_mut`]
-    /// and then calling [`SnapshotPage::write_perm`] on the returned mapping.
+    /// and then calling [`Page::write`] on the returned mapping.
     ///
     /// # Errors
     /// Returns an error if `addr` is not mapped in this MMU. Will also propagate the fault

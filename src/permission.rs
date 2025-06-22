@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 
 /// Access permissions for some amount of memory
@@ -32,7 +33,7 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 ///
 /// Additionally, execute only memory is not readable. Any attempt to read it  will cause a fault.
 #[repr(transparent)]
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub struct Perm(u8);
 
 impl Perm {
@@ -103,5 +104,33 @@ impl BitAnd for Perm {
 impl BitAndAssign for Perm {
     fn bitand_assign(&mut self, rhs: Self) {
         self.0 &= rhs.0;
+    }
+}
+
+impl Display for Perm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.read() {
+            write!(f, "R")?;
+        } else {
+            write!(f, "_")?;
+        }
+        
+        if self.write() {
+            write!(f, "W")?;
+        } else {
+            write!(f, "_")?;
+        }
+        
+        if self.exec() {
+            write!(f, "X")?;
+        } else {
+            write!(f, "_")?;
+        }
+        
+        if self.raw() {
+            write!(f, "U")
+        } else {
+            write!(f, "_")
+        }
     }
 }

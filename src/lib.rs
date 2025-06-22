@@ -10,6 +10,19 @@ pub mod fault;
 pub mod simple;
 pub mod permission;
 
+/// Collection of methods that are supported by all types of MMUs.
+pub trait Memory {
+    /// Read data from address into a buffer.
+    ///
+    /// This read will respect all permissions set on the memory.
+    fn read(&self, addr: usize, data: &mut [u8]) -> Result<(), Fault>;
+
+    /// Write data from buffer to specified address.
+    ///
+    /// Respects all permissions set on memory.
+    fn write(&mut self, addr: usize, data: &[u8]) -> Result<(), Fault>;
+}
+
 /// Software memory management unit
 ///
 /// A full software implementation of a memory management unit with byte level permissions.
@@ -35,15 +48,10 @@ pub mod permission;
 /// # fn use_mmu(_mew: &mut MMU) {}
 ///
 /// let mut memory = MMU::new();
-/// memory.map_memory(0x1000, 0x1000, Perm::default()).expect("Failed to map data section");
-/// memory.map_memory(0x8000, 0x1000, Perm::READ | Perm::EXEC).expect("Failed to map code section");
-///
-/// let data = memory.get_mapping_mut(0x1000).expect("Failed to get data section");
-/// // load data here
-/// // data.data_mut().copy_from_slice(&rw_data);
-/// let code = memory.get_mapping_mut(0x8000).expect("Failed to get code section");
-/// // load code data here
-/// // code.data_mut().copy_from_slice(&code_data);
+/// let data = memory.map_memory(0x1000, 0x1000, Perm::default()).expect("Failed to map data section");
+/// data.data_mut()[..8].copy_from_slice(&[0, 1, 2, 3, 4, 5, 6, 7]);
+/// let code = memory.map_memory(0x8000, 0x1000, Perm::READ | Perm::EXEC).expect("Failed to map code section");
+/// code.data_mut()[..8].copy_from_slice(&[8, 9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf]);
 ///
 /// // Make a snapshot
 /// let snapshot = memory.snapshot();
@@ -114,7 +122,7 @@ impl MMU {
     }
 
     /// Create a new memory mapping of the address range [start, size+1) with the given permission.
-    /// 
+    ///
     /// Returns a mutable reference to the newly created mapping so that it can be initialized.
     ///
     /// # Errors
@@ -228,6 +236,16 @@ impl MMU {
             data.push(d.snapshot());
         }
         Self { pages, data }
+    }
+}
+
+impl Memory for MMU {
+    fn read(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
+        self.read_perm(addr, buf)
+    }
+    
+    fn write(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
+        self.write_perm(addr, buf)
     }
 }
 

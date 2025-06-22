@@ -1,7 +1,7 @@
-use crate::{address::AddrRange, fault::Reason, Fault, permission::Perm};
+use crate::{address::AddrRange, fault::Reason, Fault, permission::Perm, Memory};
 
 /// Specific memory range in a simple mapping.
-/// 
+///
 /// Holds some amount of memory with all of it using the same memory permissions.
 pub struct SimpleMap {
     addr: usize,
@@ -21,7 +21,7 @@ impl SimpleMap {
     }
 
     /// Read some data from the mapping.
-    /// 
+    ///
     /// # Errors
     /// - Not mapped error if the requested address is outside the contained memory range
     /// - Fault if the memory does not have read permissions
@@ -121,7 +121,9 @@ impl MMUSimple {
         }
     }
 
-    /// Create a new memory mapping of the address range [start, size+1)
+    /// Create a new memory mapping of the address range [start, size+1).
+    ///
+    /// Returns a mutable reference to the new mapping so that it can be initialized.
     ///
     /// # Errors
     /// Returns an error if any of the address ranges that are already mapped would overlap with
@@ -130,7 +132,7 @@ impl MMUSimple {
     ///
     /// # Panics
     /// Panics if `size` is zero. This MMU does not support zero sized memory mappings.
-    pub fn map_memory(&mut self, start: usize, size: usize, perm: Perm) -> Result<(), AddrRange> {
+    pub fn map_memory(&mut self, start: usize, size: usize, perm: Perm) -> Result<&mut SimpleMap, AddrRange> {
         assert!(size != 0, "Zero sized memory mappings are not supported");
         let end = start + size;
         // Loop through to make sure there isn't any overlap
@@ -147,7 +149,8 @@ impl MMUSimple {
         self.data.push(map);
         self.pages.sort();
         self.data.sort_by(|m1, m2| m1.addr.cmp(&m2.addr));
-        Ok(())
+        // This cannot panic is we are getting back the mapping that was just added
+        Ok(self.get_mapping_mut(start).unwrap())
     }
 
     /// Get the mapping associated with an address
@@ -214,5 +217,15 @@ impl MMUSimple {
             reason: Reason::NotMapped,
         })?;
         map.write(addr, buf)
+    }
+}
+
+impl Memory for MMUSimple {
+    fn read(&self, addr: usize, data: &mut [u8]) -> Result<(), Fault> {
+        self.read(addr, data)
+    }
+    
+    fn write(&mut self, addr: usize, data: &[u8]) -> Result<(), Fault> {
+        self.write(addr, data)
     }
 }

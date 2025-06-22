@@ -1,6 +1,6 @@
 // Test writing and resetting a memory mapping 100 million times
 //
-// Gamozo was ble to get this down to about 900 milliseconds.
+// Gamozo was able to get this down to about 900 milliseconds.
 
 use softmew::permission::Perm;
 use softmew::MMU;

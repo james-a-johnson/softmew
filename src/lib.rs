@@ -1,13 +1,14 @@
 use crate::address::AddrRange;
 pub use crate::map::Mapping;
 pub use crate::fault::Fault;
-pub use crate::map::Perm;
+pub use crate::permission::Perm;
 use crate::fault::Reason;
 
 pub mod address;
 pub mod map;
 pub mod fault;
 pub mod simple;
+pub mod permission;
 
 /// Software memory management unit
 ///
@@ -29,7 +30,7 @@ pub mod simple;
 /// # Examples
 /// ```
 /// use softmew::MMU;
-/// use softmew::map::Perm;
+/// use softmew::permission::Perm;
 ///
 /// # fn use_mmu(_mew: &mut MMU) {}
 ///

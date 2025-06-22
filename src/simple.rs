@@ -63,6 +63,10 @@ impl AsMut<[u8]> for SimpleMap {
     }
 }
 
+/// Software memory management unit.
+///
+/// This implementation is more representative of an actual MMU and applies a specific memory
+/// permission to an entire page. This implementation also does not 
 #[derive(Default)]
 pub struct MMUSimple {
     /// List of AddrRanges sorted by the lowest address in the range

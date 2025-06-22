@@ -1,5 +1,5 @@
 use std::ops::Range;
-use crate::map::Perm;
+use crate::permission::Perm;
 
 /// Memory fault
 ///

@@ -9,6 +9,7 @@
 
 use crate::fault::{Fault, Reason};
 use crate::permission::Perm;
+use crate::address::AddrRange;
 use std::fmt::{Debug, Formatter};
 use std::ops::Range;
 
@@ -19,8 +20,8 @@ use std::ops::Range;
 /// will be reset to the original data. A write of any size to a block will dirty it so this
 /// parameter can change the performance of resetting a lot.
 ///
-/// A large value for this means that only a few expensive memcopies will need to be made. A
-/// smaller value means a lot more cheap memcopies will be made.
+/// A large value for this means that only a few expensive memory copies will need to be made. A
+/// smaller value means a lot more cheap memory copies will be made.
 const PAGE_SIZE: usize = 64;
 
 /// Represents some amount of backing memory used by an MMU.
@@ -68,10 +69,19 @@ pub trait Page: AsMut<[u8]> {
 /// When accessing memory with [`SnapshotPage::read`] or [`SnapshotPage::write`]
 /// the permissions for each byte that is accessed will be checked.
 pub struct SnapshotPage {
+    /// Linear array of bytes that contains all the data in the page.
     data: Box<[u8]>,
+    /// Linear array of the access permissions for each byte in the page.
     perms: Box<[Perm]>,
+    /// Array of page indexes that have been dirtied by writes.
     dirty: Vec<usize>,
+    /// Array of bits that indicate if a page has been dirtied or not.
+    ///
+    /// This is useful for checking if a page index needs to be added to `dirty` or not. It is fastest to iterate over
+    /// the `dirty` vec when restoring to a snapshot but fastest to check the `dirty_flag` bit before trying to add a
+    /// page index to `dirty`.
     dirty_flag: Box<[u64]>,
+    /// Base address of the page.
     pub addr: usize,
 }
 
@@ -87,9 +97,32 @@ impl Debug for SnapshotPage {
 }
 
 impl SnapshotPage {
+    /// Set the permissions for a range of bytes in the page.
+    ///
+    /// `idxs` is a range of bytes in the page that should have their access permissions updated. That range is based
+    /// on a zero index of the page and not the virtual address of the bytes.
+    ///
+    /// If any index is out of bounds, then no permissions will be updated and `None` will be returned.
     #[must_use]
-    pub fn set_perms(&mut self, addrs: Range<usize>, perm: Perm) -> Option<()> {
-        self.perms.get_mut(addrs).map(|p| p.fill(perm))
+    #[inline]
+    pub fn set_perms(&mut self, idxs: Range<usize>, perm: Perm) -> Option<()> {
+        self.perms.get_mut(idxs).map(|p| p.fill(perm))
+    }
+
+    /// Set permissions for a range of addresses in the page.
+    ///
+    /// This is the same as [`SnapshotPage::set_perms`] except that it takes `addrs` which is a virtual address range to
+    /// set the permissions for instead of a range of indexes.
+    ///
+    /// Returns `None` if any address in the range is out of bounds.
+    #[must_use]
+    #[inline]
+    pub fn set_perms_addrs(&mut self, addrs: Range<usize>, perm: Perm) -> Option<()> {
+        if addrs.start < self.addr {
+            return None;
+        }
+        let idxs = (addrs.start - self.addr)..(addrs.end - self.addr);
+        self.set_perms(idxs, perm)
     }
 
     /// Check that some address range is properly contained by this mapping and has the correct
@@ -104,14 +137,14 @@ impl SnapshotPage {
     fn check_perm(&self, addrs: Range<usize>, perm: Perm) -> Result<Range<usize>, Fault> {
         if addrs.start < self.addr {
             return Err(Fault {
-                address: addrs.clone(),
+                address: addrs.into(),
                 reason: Reason::NotMapped,
             });
         }
         let offset_range = (addrs.start - self.addr)..(addrs.end - self.addr);
         if offset_range.end > self.data.len() {
             return Err(Fault {
-                address: addrs.clone(),
+                address: addrs.into(),
                 reason: Reason::NotMapped,
             });
         }
@@ -121,8 +154,8 @@ impl SnapshotPage {
         let perms = unsafe { self.perms.get_unchecked(offset_range.clone()) };
         if !perms.iter().all(|p| *p & perm == perm) {
             return Err(Fault {
-                address: addrs.clone(),
-                reason: perm.into(),
+                address: addrs.into(),
+                reason: Reason::from(perm),
             });
         }
         Ok(offset_range)
@@ -135,14 +168,14 @@ impl SnapshotPage {
     ) -> Result<(Range<usize>, bool), Fault> {
         if addrs.start < self.addr {
             return Err(Fault {
-                address: addrs.clone(),
+                address: addrs.into(),
                 reason: Reason::NotMapped,
             });
         }
         let offset_range = (addrs.start - self.addr)..(addrs.end - self.addr);
         if offset_range.end > self.data.len() {
             return Err(Fault {
-                address: addrs.clone(),
+                address: addrs.into(),
                 reason: Reason::NotMapped,
             });
         }
@@ -159,8 +192,8 @@ impl SnapshotPage {
         }
         if !write.write() {
             return Err(Fault {
-                address: addrs.clone(),
-                reason: perm.into(),
+                address: addrs.into(),
+                reason: Reason::from(perm),
             });
         }
         Ok((offset_range, raw.raw()))
@@ -187,7 +220,7 @@ impl SnapshotPage {
         }
     }
 
-    /// Reset a memory mapping to have the same values as a snapshotted state
+    /// Reset a memory mapping to have the same values as a snapshot.
     ///
     /// This function assumes that the snapshot state has not changed since it was cloned from.
     ///
@@ -205,7 +238,7 @@ impl SnapshotPage {
             let start = block * PAGE_SIZE;
             let end = max_addr.min((block + 1) * PAGE_SIZE);
 
-            // SAFETY: This function is unsafe because it requries that original is a snapshot
+            // SAFETY: This function is unsafe because it requires that original is a snapshot
             // of this memory mapping. Knowing that information, all of these ranges will have
             // been made by accesses to this memory which will make the indexing valid.
 
@@ -229,7 +262,7 @@ impl SnapshotPage {
     ///
     /// Tracks if this memory mapping has been written to since the last reset. A mapping will keep
     /// track of writes to its backing memory to increase the rate at which it can return to a
-    /// snapshotted state.
+    /// snapshot state.
     #[must_use]
     pub(crate) fn dirtied(&self) -> bool {
         !self.dirty.is_empty()
@@ -271,7 +304,7 @@ impl Page for SnapshotPage {
     /// If the address read range goes out of bounds or any byte does not have [`Perm::READ`] set,
     /// then a fault will occur and an error will return.
     ///
-    /// In the case of an error, no bytes of `buf` will be written and it will be left the same
+    /// In the case of an error, no bytes of `buf` will be written, and it will be left the same
     /// value as when it was passed to the function.
     fn read(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         let offset = self.check_perm(addr..addr + buf.len(), Perm::READ)?;
@@ -298,7 +331,7 @@ impl Page for SnapshotPage {
     /// If the address read range goes out of bounds or any byte does not have [`Perm::WRITE`] set,
     /// then a fault will occur and an error will return.
     ///
-    /// In the case of an error, no bytes of `buf` will be written and it will be left the same
+    /// In the case of an error, no bytes of `buf` will be written, and it will be left the same
     /// value as when it was passed to the function.
     fn write(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
         let (offset, has_raw) = self.check_perm_write(addr..addr + buf.len(), Perm::WRITE)?;
@@ -413,20 +446,20 @@ impl Page for SimplePage {
     fn read(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         if addr < self.addr {
             return Err(Fault {
-                address: addr..addr + buf.len(),
+                address: AddrRange::new(addr, buf.len()),
                 reason: Reason::NotMapped,
             });
         }
         let offset = addr - self.addr;
         if offset + buf.len() > self.data.len() {
             return Err(Fault {
-                address: addr..addr + buf.len(),
+                address: AddrRange::new(addr, buf.len()),
                 reason: Reason::NotMapped,
             });
         }
         if !self.perm.read() {
             return Err(Fault {
-                address: addr..addr + buf.len(),
+                address: AddrRange::new(addr, buf.len()),
                 reason: Reason::NotReadable,
             });
         }
@@ -442,20 +475,20 @@ impl Page for SimplePage {
     fn write(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
         if addr < self.addr {
             return Err(Fault {
-                address: addr..addr + buf.len(),
+                address: AddrRange::new(addr, buf.len()),
                 reason: Reason::NotMapped,
             });
         }
         let offset = addr - self.addr;
         if offset + buf.len() > self.data.len() {
             return Err(Fault {
-                address: addr..addr + buf.len(),
+                address: AddrRange::new(addr, buf.len()),
                 reason: Reason::NotMapped,
             });
         }
         if !self.perm.write() {
             return Err(Fault {
-                address: addr..buf.len(),
+                address: AddrRange::new(addr, buf.len()),
                 reason: Reason::NotWritable,
             });
         }
@@ -463,6 +496,9 @@ impl Page for SimplePage {
         Ok(())
     }
 
+    /// Get the range of addresses mapped by this page.
+    ///
+    /// Range is inclusive on the lower address and exclusive on the higher address.
     fn range(&self) -> Range<usize> {
         self.addr..self.addr + self.data.len()
     }
@@ -495,20 +531,16 @@ mod test {
         map.write(0x10f, data).expect("Failed first write");
         map.write(0x409e, data).expect("Failed second write");
         let snapshot = map.snapshot();
-        map.write(0x10f, data2)
-            .expect("Failed first overwrite");
-        map.write(0x409e, data3)
-            .expect("Failed second overwrite");
+        map.write(0x10f, data2).expect("Failed first overwrite");
+        map.write(0x409e, data3).expect("Failed second overwrite");
         // SAFETY: snapshot is a snapshot of map so it's safe to use here.
         unsafe {
             map.reset(&snapshot);
         }
         let mut buffer = [0u8; 6];
-        map.read(0x10f, &mut buffer)
-            .expect("Failed first read");
+        map.read(0x10f, &mut buffer).expect("Failed first read");
         assert_eq!(&buffer[..], data);
-        map.read(0x409e, &mut buffer)
-            .expect("Failed second read");
+        map.read(0x409e, &mut buffer).expect("Failed second read");
         assert_eq!(&buffer[..], data);
     }
 
@@ -517,29 +549,24 @@ mod test {
         let mut map = SnapshotPage::new(0x100, 0x100, Perm::default());
         {
             let data = map.as_mut();
-            for i in 0..5 {
-                data[i] = b"hello"[i];
-            }
+            data[..5].copy_from_slice(b"hello");
         }
         let mut buffer = [0u8; 10];
-        map.read(0x100, &mut buffer)
-            .expect("Failed to read data");
+        map.read(0x100, &mut buffer).expect("Failed to read data");
         assert_eq!(&buffer, b"hello\x00\x00\x00\x00\x00");
     }
 
     #[test]
     fn write() {
         let mut map = SnapshotPage::new(0x100, 0x100, Perm::default());
-        map.write(0x100, b"hello")
-            .expect("Failed to write data");
+        map.write(0x100, b"hello").expect("Failed to write data");
         assert_eq!(&map.data[0..10], b"hello\x00\x00\x00\x00\x00");
     }
 
     #[test]
     fn raw() {
         let mut map = SnapshotPage::new(0x100, 0x100, Perm::RAW | Perm::WRITE);
-        map.write(0x105, b"hello")
-            .expect("Failed to write data");
+        map.write(0x105, b"hello").expect("Failed to write data");
         let mut data = [0u8; 5];
         map.read(0x105, &mut data)
             .expect("Failed to read RAW mapped data");
@@ -554,7 +581,7 @@ mod test {
         assert!(res.is_err());
         let res = res.unwrap_err();
         let Fault { address, reason } = res;
-        assert_eq!(address, 0x110..0x120);
+        assert!(address.full_eq(&AddrRange::new(0x110, 0x10)));
         assert_eq!(reason, Reason::NotReadable);
     }
 
@@ -566,7 +593,7 @@ mod test {
         assert!(res.is_err());
         let res = res.unwrap_err();
         let Fault { address, reason } = res;
-        assert_eq!(address, 0x110..0x120);
+        assert!(address.full_eq(&AddrRange::new(0x110, 0x10)));
         assert_eq!(reason, Reason::NotWritable);
     }
 
@@ -578,7 +605,31 @@ mod test {
         assert!(res.is_err());
         let res = res.unwrap_err();
         let Fault { address, reason } = res;
-        assert_eq!(address, 0x100..0x120);
+        assert!(address.full_eq(&AddrRange::new(0x100, 0x20)));
         assert_eq!(reason, Reason::NotMapped);
+    }
+
+    #[test]
+    fn change_perms() {
+        let mut map = SnapshotPage::new(0x100, 0x100, Perm::READ);
+        let fault1 = map
+            .write(0x100, &[0x1, 0x2, 0x3])
+            .expect_err("Wrote non-writeable memory");
+        assert_eq!(fault1.reason, Reason::NotWritable);
+        assert!(fault1.address.full_eq(&AddrRange::new(0x100, 0x3)));
+        let fault2 = map
+            .write(0x1f0, &[0x1, 0x2, 0x3])
+            .expect_err("Wrote non-writeable memory");
+        assert_eq!(fault2.reason, Reason::NotWritable);
+        assert!(fault2.address.full_eq(&AddrRange::new(0x1f0, 0x3)));
+        assert!(map.set_perms(0..10, Perm::READ | Perm::WRITE).is_some());
+        assert!(
+            map.set_perms_addrs(0x1f0..0x200, Perm::READ | Perm::WRITE)
+                .is_some()
+        );
+        map.write(0x100, &[0x1, 0x2, 0x3])
+            .expect("Failed to update permissions");
+        map.write(0x1f0, &[0x1, 0x2, 0x3])
+            .expect("Failed to update permissions");
     }
 }

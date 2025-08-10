@@ -1,17 +1,17 @@
 use crate::permission::Perm;
+use crate::address::AddrRange;
 use std::error::Error;
 use std::fmt::Display;
-use std::ops::Range;
 
 /// Memory fault
 ///
 /// This will be returned when some error happens when reading memory.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Fault {
     /// The addresses that were being accessed
     ///
     /// This is a range of the virtual addresses of the MMU that were being accessed.
-    pub address: Range<usize>,
+    pub address: AddrRange,
     /// Reason the fault occurred
     ///
     /// Type of memory fault that occurred.
@@ -21,12 +21,6 @@ pub struct Fault {
 impl Error for Fault {}
 
 /// Types of memory faults
-///
-/// # NOTE
-/// This does implement [`std::convert::From`] for [`Perm`]. This is really only intended for
-/// internal purposes. It may panic depending on what value the permission has when you try to
-/// convert it. From is only implement for [`Perm::READ`], [`Perm::WRITE`], and [`Perm::EXEC`]. Any
-/// other value for the permission will cause a panic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reason {
     /// Some part of the address range was not mapped
@@ -39,13 +33,13 @@ pub enum Reason {
     NotExecutable,
 }
 
-impl From<Perm> for Reason {
-    fn from(value: Perm) -> Self {
+impl Reason {
+    pub(crate) fn from(value: Perm) -> Self {
         match value {
             Perm::READ => Self::NotReadable,
             Perm::WRITE => Self::NotWritable,
             Perm::EXEC => Self::NotExecutable,
-            _ => panic!("Encountered unexpected permission"),
+            _ => unreachable!("Encountered unexpected permission"),
         }
     }
 }

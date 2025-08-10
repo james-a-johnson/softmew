@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use crate::address::AddrRange;
 use crate::fault::Fault;
 use crate::fault::Reason;
@@ -114,7 +115,9 @@ impl<P: Page> MMU<P> {
     #[must_use]
     #[inline]
     fn get_mapping_idx(&self, addr: usize) -> Option<usize> {
-        debug_assert!(self.pages.is_sorted(), "Pages list is not sorted");
+        // Why does `is_sorted_by` have a different interface to `sort_by`? I feel like those should
+        // both take a function that returns `Ordering`.
+        debug_assert!(self.pages.is_sorted_by(|a, b| AddrRange::ord_by_start(a, b) == Ordering::Less), "Pages list is not sorted");
         debug_assert!(
             self.data.is_sorted_by(|d1, d2| d1.start() < d2.start()),
             "Memory mappings are not sorted"
@@ -160,7 +163,7 @@ impl<P: Page> MMU<P> {
         let new_range = AddrRange::new(start, size);
         self.pages.push(new_range);
         self.data.push(new_mapping);
-        self.pages.sort();
+        self.pages.sort_by(AddrRange::ord_by_start);
         self.data.sort_by_key(Page::start);
         // This cannot panic because we just inserted the mapping that we're requesting.
         Ok(self.get_mapping_mut(start).unwrap())
@@ -259,22 +262,22 @@ mod test {
         // First byte overlaps
         let res = mew.map_memory(0x0, 0x101, Perm::default());
         let err = res.expect_err("Overlapping memory mapping succeeded");
-        assert_eq!(err, expected);
+        assert!(err.full_eq(&expected));
 
         // Last byte overlaps
         let res = mew.map_memory(0x1ff, 0x201, Perm::default());
         let err = res.expect_err("Overlapping memory mapping succeeded");
-        assert_eq!(err, expected);
+        assert!(err.full_eq(&expected));
 
         // New mapping completely contains old one
         let res = mew.map_memory(0x0, 0x1000, Perm::default());
         let err = res.expect_err("Overlapping memory mapping succeeded");
-        assert_eq!(err, expected);
+        assert!(err.full_eq(&expected));
 
         // Old mapping completely contains new one
         let res = mew.map_memory(0x110, 0x20, Perm::default());
         let err = res.expect_err("Overlapping memory mapping succeeded");
-        assert_eq!(err, expected);
+        assert!(err.full_eq(&expected));
 
         mew.map_memory(0x80, 0x80, Perm::default())
             .expect("Failed to map second memory region");

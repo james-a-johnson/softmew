@@ -139,7 +139,7 @@ impl<P: Page> MMU<P> {
     /// with it.
     ///
     /// # Panics
-    /// Panics if `size` is zero. This MMU does not support zero sized memory mappings.
+    /// `size` must not be zero. This MMU does not support zero sized memory mappings.
     pub fn map_memory(
         &mut self,
         start: usize,
@@ -203,14 +203,14 @@ impl<P: Page> MMU<P> {
 impl MMU<SnapshotPage> {
     /// Reset all memory to some snapshotted state
     ///
-    /// Resets all of the memory in this MMU to the state that it was at when `original` was cloned
+    /// Resets all the memory in this MMU to the state that it was at when `original` was cloned
     /// from this MMU.
     ///
     /// # Safety
     /// Requires that original be a snapshot of this mapping.
     ///
     /// # Panics
-    /// May panic if `original` was not cloned from this MMU or if more more memory was mapped to
+    /// May panic if `original` was not cloned from this MMU or if more memory was mapped to
     /// `original` after it was cloned.
     pub unsafe fn reset(&mut self, original: &Self) {
         debug_assert_eq!(self.data.len(), original.data.len());

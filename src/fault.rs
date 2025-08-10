@@ -23,7 +23,7 @@ impl Error for Fault {}
 /// Types of memory faults
 ///
 /// # NOTE
-/// This does implement [`std::convert::From`] for [`Perm`]. This is really only intended for
+/// This does implement [`From`] for [`Perm`]. This is really only intended for
 /// internal purposes. It may panic depending on what value the permission has when you try to
 /// convert it. From is only implement for [`Perm::READ`], [`Perm::WRITE`], and [`Perm::EXEC`]. Any
 /// other value for the permission will cause a panic.

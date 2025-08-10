@@ -20,8 +20,8 @@ use std::ops::Range;
 /// will be reset to the original data. A write of any size to a block will dirty it so this
 /// parameter can change the performance of resetting a lot.
 ///
-/// A large value for this means that only a few expensive memcopies will need to be made. A
-/// smaller value means a lot more cheap memcopies will be made.
+/// A large value for this means that only a few expensive memory copies will need to be made. A
+/// smaller value means a lot more cheap memory copies will be made.
 const PAGE_SIZE: usize = 64;
 
 /// Represents some amount of backing memory used by an MMU.
@@ -69,7 +69,7 @@ pub trait Page: AsMut<[u8]> {
 /// When accessing memory with [`SnapshotPage::read`] or [`SnapshotPage::write`]
 /// the permissions for each byte that is accessed will be checked.
 pub struct SnapshotPage {
-    /// Linear array of bytes that contains all of the data in the page.
+    /// Linear array of bytes that contains all the data in the page.
     data: Box<[u8]>,
     /// Linear array of the access permissions for each byte in the page.
     perms: Box<[Perm]>,
@@ -220,7 +220,7 @@ impl SnapshotPage {
         }
     }
 
-    /// Reset a memory mapping to have the same values as a snapshotted state
+    /// Reset a memory mapping to have the same values as a snapshot.
     ///
     /// This function assumes that the snapshot state has not changed since it was cloned from.
     ///
@@ -238,7 +238,7 @@ impl SnapshotPage {
             let start = block * PAGE_SIZE;
             let end = max_addr.min((block + 1) * PAGE_SIZE);
 
-            // SAFETY: This function is unsafe because it requries that original is a snapshot
+            // SAFETY: This function is unsafe because it requires that original is a snapshot
             // of this memory mapping. Knowing that information, all of these ranges will have
             // been made by accesses to this memory which will make the indexing valid.
 
@@ -262,7 +262,7 @@ impl SnapshotPage {
     ///
     /// Tracks if this memory mapping has been written to since the last reset. A mapping will keep
     /// track of writes to its backing memory to increase the rate at which it can return to a
-    /// snapshotted state.
+    /// snapshot state.
     #[must_use]
     pub(crate) fn dirtied(&self) -> bool {
         !self.dirty.is_empty()
@@ -304,7 +304,7 @@ impl Page for SnapshotPage {
     /// If the address read range goes out of bounds or any byte does not have [`Perm::READ`] set,
     /// then a fault will occur and an error will return.
     ///
-    /// In the case of an error, no bytes of `buf` will be written and it will be left the same
+    /// In the case of an error, no bytes of `buf` will be written, and it will be left the same
     /// value as when it was passed to the function.
     fn read(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         let offset = self.check_perm(addr..addr + buf.len(), Perm::READ)?;
@@ -331,7 +331,7 @@ impl Page for SnapshotPage {
     /// If the address read range goes out of bounds or any byte does not have [`Perm::WRITE`] set,
     /// then a fault will occur and an error will return.
     ///
-    /// In the case of an error, no bytes of `buf` will be written and it will be left the same
+    /// In the case of an error, no bytes of `buf` will be written, and it will be left the same
     /// value as when it was passed to the function.
     fn write(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
         let (offset, has_raw) = self.check_perm_write(addr..addr + buf.len(), Perm::WRITE)?;

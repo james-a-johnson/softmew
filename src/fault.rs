@@ -6,7 +6,7 @@ use std::fmt::Display;
 /// Memory fault
 ///
 /// This will be returned when some error happens when reading memory.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Fault {
     /// The addresses that were being accessed
     ///

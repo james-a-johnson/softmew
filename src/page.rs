@@ -155,7 +155,7 @@ impl SnapshotPage {
         if !perms.iter().all(|p| *p & perm == perm) {
             return Err(Fault {
                 address: addrs.into(),
-                reason: perm.into(),
+                reason: Reason::from(perm),
             });
         }
         Ok(offset_range)
@@ -193,7 +193,7 @@ impl SnapshotPage {
         if !write.write() {
             return Err(Fault {
                 address: addrs.into(),
-                reason: perm.into(),
+                reason: Reason::from(perm),
             });
         }
         Ok((offset_range, raw.raw()))

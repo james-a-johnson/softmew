@@ -68,10 +68,19 @@ pub trait Page: AsMut<[u8]> {
 /// When accessing memory with [`SnapshotPage::read`] or [`SnapshotPage::write`]
 /// the permissions for each byte that is accessed will be checked.
 pub struct SnapshotPage {
+    /// Linear array of bytes that contains all of the data in the page.
     data: Box<[u8]>,
+    /// Linear array of the access permissions for each byte in the page.
     perms: Box<[Perm]>,
+    /// Array of page indexes that have been dirtied by writes.
     dirty: Vec<usize>,
+    /// Array of bits that indicate if a page has been dirtied or not.
+    ///
+    /// This is useful for checking if a page index needs to be added to `dirty` or not. It is fastest to iterate over
+    /// the `dirty` vec when restoring to a snapshot but fastest to check the `dirty_flag` bit before trying to add a
+    /// page index to `dirty`.
     dirty_flag: Box<[u64]>,
+    /// Base address of the page.
     pub addr: usize,
 }
 
@@ -87,9 +96,32 @@ impl Debug for SnapshotPage {
 }
 
 impl SnapshotPage {
+    /// Set the permissions for a range of bytes in the page.
+    ///
+    /// `idxs` is a range of bytes in the page that should have their access permissions updated. That range is based
+    /// on a zero index of the page and not the virtual address of the bytes.
+    ///
+    /// If any index is out of bounds, then no permissions will be updated and `None` will be returned.
     #[must_use]
-    pub fn set_perms(&mut self, addrs: Range<usize>, perm: Perm) -> Option<()> {
-        self.perms.get_mut(addrs).map(|p| p.fill(perm))
+    #[inline]
+    pub fn set_perms(&mut self, idxs: Range<usize>, perm: Perm) -> Option<()> {
+        self.perms.get_mut(idxs).map(|p| p.fill(perm))
+    }
+
+    /// Set permissions for a range of addresses in the page.
+    ///
+    /// This is the same as [`SnapshotPage::set_perms`] except that it takes `addrs` which is a virtual address range to
+    /// set the permissions for instead of a range of indexes.
+    ///
+    /// Returns `None` if any address in the range is out of bounds.
+    #[must_use]
+    #[inline]
+    pub fn set_perms_addrs(&mut self, addrs: Range<usize>, perm: Perm) -> Option<()> {
+        if addrs.start < self.addr {
+            return None;
+        }
+        let idxs = (addrs.start - self.addr)..(addrs.end - self.addr);
+        self.set_perms(idxs, perm)
     }
 
     /// Check that some address range is properly contained by this mapping and has the correct
@@ -463,6 +495,9 @@ impl Page for SimplePage {
         Ok(())
     }
 
+    /// Get the range of addresses mapped by this page.
+    ///
+    /// Range is inclusive on the lower address and exclusive on the higher address.
     fn range(&self) -> Range<usize> {
         self.addr..self.addr + self.data.len()
     }
@@ -495,20 +530,16 @@ mod test {
         map.write(0x10f, data).expect("Failed first write");
         map.write(0x409e, data).expect("Failed second write");
         let snapshot = map.snapshot();
-        map.write(0x10f, data2)
-            .expect("Failed first overwrite");
-        map.write(0x409e, data3)
-            .expect("Failed second overwrite");
+        map.write(0x10f, data2).expect("Failed first overwrite");
+        map.write(0x409e, data3).expect("Failed second overwrite");
         // SAFETY: snapshot is a snapshot of map so it's safe to use here.
         unsafe {
             map.reset(&snapshot);
         }
         let mut buffer = [0u8; 6];
-        map.read(0x10f, &mut buffer)
-            .expect("Failed first read");
+        map.read(0x10f, &mut buffer).expect("Failed first read");
         assert_eq!(&buffer[..], data);
-        map.read(0x409e, &mut buffer)
-            .expect("Failed second read");
+        map.read(0x409e, &mut buffer).expect("Failed second read");
         assert_eq!(&buffer[..], data);
     }
 
@@ -517,29 +548,24 @@ mod test {
         let mut map = SnapshotPage::new(0x100, 0x100, Perm::default());
         {
             let data = map.as_mut();
-            for i in 0..5 {
-                data[i] = b"hello"[i];
-            }
+            data[..5].copy_from_slice(b"hello");
         }
         let mut buffer = [0u8; 10];
-        map.read(0x100, &mut buffer)
-            .expect("Failed to read data");
+        map.read(0x100, &mut buffer).expect("Failed to read data");
         assert_eq!(&buffer, b"hello\x00\x00\x00\x00\x00");
     }
 
     #[test]
     fn write() {
         let mut map = SnapshotPage::new(0x100, 0x100, Perm::default());
-        map.write(0x100, b"hello")
-            .expect("Failed to write data");
+        map.write(0x100, b"hello").expect("Failed to write data");
         assert_eq!(&map.data[0..10], b"hello\x00\x00\x00\x00\x00");
     }
 
     #[test]
     fn raw() {
         let mut map = SnapshotPage::new(0x100, 0x100, Perm::RAW | Perm::WRITE);
-        map.write(0x105, b"hello")
-            .expect("Failed to write data");
+        map.write(0x105, b"hello").expect("Failed to write data");
         let mut data = [0u8; 5];
         map.read(0x105, &mut data)
             .expect("Failed to read RAW mapped data");
@@ -580,5 +606,39 @@ mod test {
         let Fault { address, reason } = res;
         assert_eq!(address, 0x100..0x120);
         assert_eq!(reason, Reason::NotMapped);
+    }
+
+    #[test]
+    fn change_perms() {
+        let mut map = SnapshotPage::new(0x100, 0x100, Perm::READ);
+        let fault1 = map
+            .write(0x100, &[0x1, 0x2, 0x3])
+            .expect_err("Wrote non-writeable memory");
+        assert_eq!(
+            fault1,
+            Fault {
+                address: 0x100..0x103,
+                reason: Reason::NotWritable,
+            }
+        );
+        let fault2 = map
+            .write(0x1f0, &[0x1, 0x2, 0x3])
+            .expect_err("Wrote non-writeable memory");
+        assert_eq!(
+            fault2,
+            Fault {
+                address: 0x1f0..0x1f3,
+                reason: Reason::NotWritable,
+            }
+        );
+        assert!(map.set_perms(0..10, Perm::READ | Perm::WRITE).is_some());
+        assert!(
+            map.set_perms_addrs(0x1f0..0x200, Perm::READ | Perm::WRITE)
+                .is_some()
+        );
+        map.write(0x100, &[0x1, 0x2, 0x3])
+            .expect("Failed to update permissions");
+        map.write(0x1f0, &[0x1, 0x2, 0x3])
+            .expect("Failed to update permissions");
     }
 }

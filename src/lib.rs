@@ -176,7 +176,7 @@ impl<P: Page> MMU<P> {
     /// returned by the underlying [`SnapshotPage`].
     pub fn read_perm(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         let map = self.get_mapping(addr).ok_or(Fault {
-            address: addr..addr + buf.len(),
+            address: AddrRange::new(addr, buf.len()),
             reason: Reason::NotMapped,
         })?;
         map.read(addr, buf)
@@ -193,7 +193,7 @@ impl<P: Page> MMU<P> {
     /// returned by the underlying [`SnapshotPage`].
     pub fn write_perm(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
         let map = self.get_mapping_mut(addr).ok_or(Fault {
-            address: addr..addr + buf.len(),
+            address: AddrRange::new(addr, buf.len()),
             reason: Reason::NotMapped,
         })?;
         map.write(addr, buf)
@@ -323,6 +323,6 @@ mod test {
         assert!(read.is_err());
         let err = read.unwrap_err();
         assert_eq!(err.reason, Reason::NotReadable);
-        assert_eq!(err.address, 0xaf01..0xaf09);
+        assert!(err.address.full_eq(&AddrRange::new(0xaf01, 0x8)));
     }
 }

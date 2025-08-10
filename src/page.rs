@@ -9,6 +9,7 @@
 
 use crate::fault::{Fault, Reason};
 use crate::permission::Perm;
+use crate::address::AddrRange;
 use std::fmt::{Debug, Formatter};
 use std::ops::Range;
 
@@ -136,14 +137,14 @@ impl SnapshotPage {
     fn check_perm(&self, addrs: Range<usize>, perm: Perm) -> Result<Range<usize>, Fault> {
         if addrs.start < self.addr {
             return Err(Fault {
-                address: addrs.clone(),
+                address: addrs.into(),
                 reason: Reason::NotMapped,
             });
         }
         let offset_range = (addrs.start - self.addr)..(addrs.end - self.addr);
         if offset_range.end > self.data.len() {
             return Err(Fault {
-                address: addrs.clone(),
+                address: addrs.into(),
                 reason: Reason::NotMapped,
             });
         }
@@ -153,7 +154,7 @@ impl SnapshotPage {
         let perms = unsafe { self.perms.get_unchecked(offset_range.clone()) };
         if !perms.iter().all(|p| *p & perm == perm) {
             return Err(Fault {
-                address: addrs.clone(),
+                address: addrs.into(),
                 reason: perm.into(),
             });
         }
@@ -167,14 +168,14 @@ impl SnapshotPage {
     ) -> Result<(Range<usize>, bool), Fault> {
         if addrs.start < self.addr {
             return Err(Fault {
-                address: addrs.clone(),
+                address: addrs.into(),
                 reason: Reason::NotMapped,
             });
         }
         let offset_range = (addrs.start - self.addr)..(addrs.end - self.addr);
         if offset_range.end > self.data.len() {
             return Err(Fault {
-                address: addrs.clone(),
+                address: addrs.into(),
                 reason: Reason::NotMapped,
             });
         }
@@ -191,7 +192,7 @@ impl SnapshotPage {
         }
         if !write.write() {
             return Err(Fault {
-                address: addrs.clone(),
+                address: addrs.into(),
                 reason: perm.into(),
             });
         }
@@ -445,20 +446,20 @@ impl Page for SimplePage {
     fn read(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         if addr < self.addr {
             return Err(Fault {
-                address: addr..addr + buf.len(),
+                address: AddrRange::new(addr, buf.len()),
                 reason: Reason::NotMapped,
             });
         }
         let offset = addr - self.addr;
         if offset + buf.len() > self.data.len() {
             return Err(Fault {
-                address: addr..addr + buf.len(),
+                address: AddrRange::new(addr, buf.len()),
                 reason: Reason::NotMapped,
             });
         }
         if !self.perm.read() {
             return Err(Fault {
-                address: addr..addr + buf.len(),
+                address: AddrRange::new(addr, buf.len()),
                 reason: Reason::NotReadable,
             });
         }
@@ -474,20 +475,20 @@ impl Page for SimplePage {
     fn write(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
         if addr < self.addr {
             return Err(Fault {
-                address: addr..addr + buf.len(),
+                address: AddrRange::new(addr, buf.len()),
                 reason: Reason::NotMapped,
             });
         }
         let offset = addr - self.addr;
         if offset + buf.len() > self.data.len() {
             return Err(Fault {
-                address: addr..addr + buf.len(),
+                address: AddrRange::new(addr, buf.len()),
                 reason: Reason::NotMapped,
             });
         }
         if !self.perm.write() {
             return Err(Fault {
-                address: addr..buf.len(),
+                address: AddrRange::new(addr, buf.len()),
                 reason: Reason::NotWritable,
             });
         }
@@ -580,7 +581,7 @@ mod test {
         assert!(res.is_err());
         let res = res.unwrap_err();
         let Fault { address, reason } = res;
-        assert_eq!(address, 0x110..0x120);
+        assert!(address.full_eq(&AddrRange::new(0x110, 0x10)));
         assert_eq!(reason, Reason::NotReadable);
     }
 
@@ -592,7 +593,7 @@ mod test {
         assert!(res.is_err());
         let res = res.unwrap_err();
         let Fault { address, reason } = res;
-        assert_eq!(address, 0x110..0x120);
+        assert!(address.full_eq(&AddrRange::new(0x110, 0x10)));
         assert_eq!(reason, Reason::NotWritable);
     }
 
@@ -604,7 +605,7 @@ mod test {
         assert!(res.is_err());
         let res = res.unwrap_err();
         let Fault { address, reason } = res;
-        assert_eq!(address, 0x100..0x120);
+        assert!(address.full_eq(&AddrRange::new(0x100, 0x20)));
         assert_eq!(reason, Reason::NotMapped);
     }
 
@@ -614,23 +615,13 @@ mod test {
         let fault1 = map
             .write(0x100, &[0x1, 0x2, 0x3])
             .expect_err("Wrote non-writeable memory");
-        assert_eq!(
-            fault1,
-            Fault {
-                address: 0x100..0x103,
-                reason: Reason::NotWritable,
-            }
-        );
+        assert_eq!(fault1.reason, Reason::NotWritable);
+        assert!(fault1.address.full_eq(&AddrRange::new(0x100, 0x3)));
         let fault2 = map
             .write(0x1f0, &[0x1, 0x2, 0x3])
             .expect_err("Wrote non-writeable memory");
-        assert_eq!(
-            fault2,
-            Fault {
-                address: 0x1f0..0x1f3,
-                reason: Reason::NotWritable,
-            }
-        );
+        assert_eq!(fault2.reason, Reason::NotWritable);
+        assert!(fault2.address.full_eq(&AddrRange::new(0x1f0, 0x3)));
         assert!(map.set_perms(0..10, Perm::READ | Perm::WRITE).is_some());
         assert!(
             map.set_perms_addrs(0x1f0..0x200, Perm::READ | Perm::WRITE)

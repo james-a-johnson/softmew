@@ -5,6 +5,8 @@ use std::ops::Range;
 ///
 /// These are fully ordered by their beginning address so that it is easy to keep them sorted in
 /// the MMU struct.
+///
+/// The start address is inclusive and the end address is exclusive.
 #[derive(Clone, Copy)]
 pub struct AddrRange {
     pub start: usize,
@@ -44,6 +46,13 @@ impl AddrRange {
             Ordering::Less
         }
     }
+
+    /// Test for full equality between two address ranges.
+    ///
+    /// This is mainly just used for testing.
+    pub fn full_eq(&self, other: &Self) -> bool {
+        self.start == other.start && self.end == other.end
+    }
 }
 
 impl std::fmt::Debug for AddrRange {
@@ -56,7 +65,7 @@ impl From<Range<usize>> for AddrRange {
     fn from(value: Range<usize>) -> Self {
         Self {
             start: value.start,
-            end: value.start,
+            end: value.end,
         }
     }
 }
@@ -78,5 +87,18 @@ impl PartialOrd for AddrRange {
 impl Ord for AddrRange {
     fn cmp(&self, other: &Self) -> Ordering {
         self.start.cmp(&other.start)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ordering() {
+        let a = AddrRange::new(0, 10);
+        let b = AddrRange::new(1, 9);
+        assert!(a < b);
+        assert!(b > a);
     }
 }

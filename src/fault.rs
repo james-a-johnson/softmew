@@ -1,7 +1,7 @@
 use crate::permission::Perm;
+use crate::address::AddrRange;
 use std::error::Error;
 use std::fmt::Display;
-use std::ops::Range;
 
 /// Memory fault
 ///
@@ -11,7 +11,7 @@ pub struct Fault {
     /// The addresses that were being accessed
     ///
     /// This is a range of the virtual addresses of the MMU that were being accessed.
-    pub address: Range<usize>,
+    pub address: AddrRange,
     /// Reason the fault occurred
     ///
     /// Type of memory fault that occurred.

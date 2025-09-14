@@ -66,6 +66,12 @@ impl AddrRange {
     pub fn ord_by_start(&self, other: &Self) -> Ordering {
         self.start.cmp(&other.start)
     }
+
+    /// Size of the address range in bytes.
+    #[inline(always)]
+    pub const fn size(&self) -> usize {
+        self.end - self.start
+    }
 }
 
 impl std::fmt::Debug for AddrRange {

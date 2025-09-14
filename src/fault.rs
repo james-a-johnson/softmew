@@ -1,5 +1,5 @@
-use crate::permission::Perm;
 use crate::address::AddrRange;
+use crate::permission::Perm;
 use std::error::Error;
 use std::fmt::Display;
 

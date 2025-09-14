@@ -114,19 +114,19 @@ impl Display for Perm {
         } else {
             write!(f, "_")?;
         }
-        
+
         if self.write() {
             write!(f, "W")?;
         } else {
             write!(f, "_")?;
         }
-        
+
         if self.exec() {
             write!(f, "X")?;
         } else {
             write!(f, "_")?;
         }
-        
+
         if self.raw() {
             write!(f, "U")
         } else {

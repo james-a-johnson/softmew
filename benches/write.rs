@@ -1,8 +1,8 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
 use softmew::page::SnapshotPage;
-use softmew::{permission::Perm, MMU};
+use softmew::{MMU, permission::Perm};
 
 fn write_lots_of_ranges(c: &mut Criterion) {
     let mut mew = MMU::<SnapshotPage>::new();

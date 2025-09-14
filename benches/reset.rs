@@ -1,9 +1,9 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use softmew::permission::Perm;
 use softmew::MMU;
 use softmew::page::SnapshotPage;
+use softmew::permission::Perm;
 
 fn write_and_reset(mew: &mut MMU<SnapshotPage>, orig: &MMU<SnapshotPage>) {
     mew.write_perm(0x1080, b"alfalfa sprouts").unwrap();

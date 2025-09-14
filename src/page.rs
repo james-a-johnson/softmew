@@ -7,9 +7,9 @@
 //! The set of common page operations is defined by [`Page`]. The specific page implementation may
 //! offer additional functionality.
 
+use crate::address::AddrRange;
 use crate::fault::{Fault, Reason};
 use crate::permission::Perm;
-use crate::address::AddrRange;
 use std::fmt::{Debug, Formatter};
 use std::ops::Range;
 

@@ -1,9 +1,9 @@
-use std::cmp::Ordering;
 use crate::address::AddrRange;
 use crate::fault::Fault;
 use crate::fault::Reason;
 use crate::page::{Page, SnapshotPage};
 pub use crate::permission::Perm;
+use std::cmp::Ordering;
 
 pub mod address;
 pub mod fault;
@@ -117,7 +117,11 @@ impl<P: Page> MMU<P> {
     fn get_mapping_idx(&self, addr: usize) -> Option<usize> {
         // Why does `is_sorted_by` have a different interface to `sort_by`? I feel like those should
         // both take a function that returns `Ordering`.
-        debug_assert!(self.pages.is_sorted_by(|a, b| AddrRange::ord_by_start(a, b) == Ordering::Less), "Pages list is not sorted");
+        debug_assert!(
+            self.pages
+                .is_sorted_by(|a, b| AddrRange::ord_by_start(a, b) == Ordering::Less),
+            "Pages list is not sorted"
+        );
         debug_assert!(
             self.data.is_sorted_by(|d1, d2| d1.start() < d2.start()),
             "Memory mappings are not sorted"
@@ -203,12 +207,13 @@ impl<P: Page> MMU<P> {
     }
 
     /// Iterate over all of the mapped memory ranges.
-    pub fn mappings<'s>(&'s self) -> impl Iterator<Item = &'s P> {
+    pub fn mappings(&self) -> impl Iterator<Item = &P> {
         self.data.iter()
     }
 
     /// Get an iterator over all of the unmapped ranges.
-    pub fn gaps<'m>(&'m self) -> Gaps<'m, P> {
+    #[must_use]
+    pub fn gaps(&self) -> Gaps<'_, P> {
         Gaps::new(self)
     }
 }
@@ -278,7 +283,7 @@ impl<'m, P> Gaps<'m, P> {
     }
 }
 
-impl<'m, P> Iterator for Gaps<'m, P> {
+impl<P> Iterator for Gaps<'_, P> {
     type Item = AddrRange;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -286,18 +291,32 @@ impl<'m, P> Iterator for Gaps<'m, P> {
             return None;
         }
 
-        if self.mmu.data.len() == 0 {
+        if self.mmu.data.is_empty() {
             self.starting_addr = usize::MAX;
-            return Some(AddrRange { start: 0, end: usize::MAX });
+            return Some(AddrRange {
+                start: 0,
+                end: usize::MAX,
+            });
         }
 
         loop {
             let start = self.starting_addr;
-            let limiting_addr = self.mmu.pages.get(self.page_idx).map(|p| p.start).unwrap_or(usize::MAX);
-            self.starting_addr = self.mmu.pages.get(self.page_idx).map(|p| p.end).unwrap_or(usize::MAX);
+            let limiting_addr = self
+                .mmu
+                .pages
+                .get(self.page_idx)
+                .map_or(usize::MAX, |p| p.start);
+            self.starting_addr = self
+                .mmu
+                .pages
+                .get(self.page_idx)
+                .map_or(usize::MAX, |p| p.end);
             self.page_idx += 1;
             if limiting_addr > start {
-                return Some(AddrRange { start, end: limiting_addr });
+                return Some(AddrRange {
+                    start,
+                    end: limiting_addr,
+                });
             }
 
             if limiting_addr == usize::MAX {
@@ -309,8 +328,8 @@ impl<'m, P> Iterator for Gaps<'m, P> {
 
 #[cfg(test)]
 mod test {
-    use crate::page::SimplePage;
     use super::*;
+    use crate::page::SimplePage;
 
     #[test]
     fn overlapping() {
@@ -397,9 +416,18 @@ mod test {
         mem.map_memory(0xb000, 0x1000, Perm::WRITE).unwrap();
 
         let mut gaps = mem.gaps();
-        assert!(gaps.next().unwrap().full_eq(&AddrRange { start: 0x0, end: 0x1000 }));
-        assert!(gaps.next().unwrap().full_eq(&AddrRange { start: 0x2000, end: 0xa000 }));
-        assert!(gaps.next().unwrap().full_eq(&AddrRange { start: 0xc000, end: usize::MAX }));
+        assert!(gaps.next().unwrap().full_eq(&AddrRange {
+            start: 0x0,
+            end: 0x1000
+        }));
+        assert!(gaps.next().unwrap().full_eq(&AddrRange {
+            start: 0x2000,
+            end: 0xa000
+        }));
+        assert!(gaps.next().unwrap().full_eq(&AddrRange {
+            start: 0xc000,
+            end: usize::MAX
+        }));
         assert!(gaps.next().is_none());
     }
 }

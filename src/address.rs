@@ -63,12 +63,16 @@ impl AddrRange {
         self.start == other.start && self.end == other.end
     }
 
+    /// Compare this address range to another by starting addresses.
+    #[inline]
+    #[must_use]
     pub fn ord_by_start(&self, other: &Self) -> Ordering {
         self.start.cmp(&other.start)
     }
 
     /// Size of the address range in bytes.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn size(&self) -> usize {
         self.end - self.start
     }

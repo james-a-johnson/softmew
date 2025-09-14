@@ -176,7 +176,7 @@ impl<P: Page> MMU<P> {
     ///
     /// # Errors
     /// Returns an error if `addr` is not mapped in this MMU. Will also propagate the fault
-    /// returned by the underlying [`SnapshotPage`].
+    /// returned by the underlying page implementation.
     pub fn read_perm(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
         let map = self.get_mapping(addr).ok_or(Fault {
             address: AddrRange::new(addr, buf.len()),
@@ -193,13 +193,23 @@ impl<P: Page> MMU<P> {
     ///
     /// # Errors
     /// Returns an error if `addr` is not mapped in this MMU. Will also propagate the fault
-    /// returned by the underlying [`SnapshotPage`].
+    /// returned by the underlying page implementation.
     pub fn write_perm(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
         let map = self.get_mapping_mut(addr).ok_or(Fault {
             address: AddrRange::new(addr, buf.len()),
             reason: Reason::NotMapped,
         })?;
         map.write(addr, buf)
+    }
+
+    /// Iterate over all of the mapped memory ranges.
+    pub fn mappings<'s>(&'s self) -> impl Iterator<Item = &'s P> {
+        self.data.iter()
+    }
+
+    /// Get an iterator over all of the unmapped ranges.
+    pub fn gaps<'m>(&'m self) -> Gaps<'m, P> {
+        Gaps::new(self)
     }
 }
 
@@ -244,6 +254,56 @@ impl MMU<SnapshotPage> {
             data.push(d.snapshot());
         }
         Self { pages, data }
+    }
+}
+
+/// Iterator over the contiguous unmapped ranges in an MMU.
+///
+/// This can make it easier to determine what unmapped ranges exist when you
+/// need to map in a new range but have complete information about what might
+/// already have been mapped.
+pub struct Gaps<'m, P> {
+    mmu: &'m MMU<P>,
+    starting_addr: usize,
+    page_idx: usize,
+}
+
+impl<'m, P> Gaps<'m, P> {
+    fn new(mmu: &'m MMU<P>) -> Self {
+        Self {
+            mmu,
+            starting_addr: 0,
+            page_idx: 0,
+        }
+    }
+}
+
+impl<'m, P> Iterator for Gaps<'m, P> {
+    type Item = AddrRange;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.starting_addr == usize::MAX {
+            return None;
+        }
+
+        if self.mmu.data.len() == 0 {
+            self.starting_addr = usize::MAX;
+            return Some(AddrRange { start: 0, end: usize::MAX });
+        }
+
+        loop {
+            let start = self.starting_addr;
+            let limiting_addr = self.mmu.pages.get(self.page_idx).map(|p| p.start).unwrap_or(usize::MAX);
+            self.starting_addr = self.mmu.pages.get(self.page_idx).map(|p| p.end).unwrap_or(usize::MAX);
+            self.page_idx += 1;
+            if limiting_addr > start {
+                return Some(AddrRange { start, end: limiting_addr });
+            }
+
+            if limiting_addr == usize::MAX {
+                return None;
+            }
+        }
     }
 }
 
@@ -327,5 +387,19 @@ mod test {
         let err = read.unwrap_err();
         assert_eq!(err.reason, Reason::NotReadable);
         assert!(err.address.full_eq(&AddrRange::new(0xaf01, 0x8)));
+    }
+
+    #[test]
+    fn gap_iterator() {
+        let mut mem = MMU::<SimplePage>::new();
+        mem.map_memory(0x1000, 0x1000, Perm::READ).unwrap();
+        mem.map_memory(0xa000, 0x1000, Perm::READ).unwrap();
+        mem.map_memory(0xb000, 0x1000, Perm::WRITE).unwrap();
+
+        let mut gaps = mem.gaps();
+        assert!(gaps.next().unwrap().full_eq(&AddrRange { start: 0x0, end: 0x1000 }));
+        assert!(gaps.next().unwrap().full_eq(&AddrRange { start: 0x2000, end: 0xa000 }));
+        assert!(gaps.next().unwrap().full_eq(&AddrRange { start: 0xc000, end: usize::MAX }));
+        assert!(gaps.next().is_none());
     }
 }

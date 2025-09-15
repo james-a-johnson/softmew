@@ -38,7 +38,7 @@ pub mod permission;
 /// let mut memory = MMU::<SnapshotPage>::new();
 /// let data = memory.map_memory(0x1000, 0x1000, Perm::default()).expect("Failed to map data section");
 /// data.as_mut()[..8].copy_from_slice(&[0, 1, 2, 3, 4, 5, 6, 7]);
-/// let code = memory.map_memory(0x8000, 0x1000, Perm::READ | Perm::EXEC).expect("Failed to map code section");
+/// let code = memory.map_memory(0x8000, 0x1000, Perm::READ).expect("Failed to map code section");
 /// code.as_mut()[..8].copy_from_slice(&[8, 9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf]);
 ///
 /// // Make a snapshot

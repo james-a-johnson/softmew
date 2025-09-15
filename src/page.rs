@@ -575,7 +575,7 @@ mod test {
 
     #[test]
     fn read_fail() {
-        let map = SnapshotPage::new(0x100, 0x100, Perm::EXEC);
+        let map = SnapshotPage::new(0x100, 0x100, Perm::NONE);
         let mut buffer = [0u8; 0x10];
         let res = map.read(0x110, &mut buffer);
         assert!(res.is_err());
@@ -587,7 +587,7 @@ mod test {
 
     #[test]
     fn write_fail() {
-        let mut map = SnapshotPage::new(0x100, 0x100, Perm::EXEC);
+        let mut map = SnapshotPage::new(0x100, 0x100, Perm::NONE);
         let buffer = [10u8; 0x10];
         let res = map.write(0x110, &buffer);
         assert!(res.is_err());

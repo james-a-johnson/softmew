@@ -7,7 +7,6 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 /// - [`Perm::NONE`]
 /// - [`Perm::READ`]
 /// - [`Perm::WRITE`]
-/// - [`Perm::EXEC`]
 /// - [`Perm::RAW`]
 ///
 /// A combination can be made by oring together any two permissions to get the union of
@@ -43,12 +42,10 @@ impl Perm {
     pub const READ: Self = Self(1 << 0);
     /// Memory may be written to
     pub const WRITE: Self = Self(1 << 1);
-    /// Memory may be executed / fetched for execution
-    pub const EXEC: Self = Self(1 << 2);
     /// Memory may be read after it has first been written to
     ///
     /// Makes sense to set this flag for uninitialized memory.
-    pub const RAW: Self = Self(1 << 3);
+    pub const RAW: Self = Self(1 << 2);
 
     /// Check if permission allows reading
     #[must_use]
@@ -60,12 +57,6 @@ impl Perm {
     #[must_use]
     pub fn write(&self) -> bool {
         *self & Self::WRITE == Self::WRITE
-    }
-
-    /// Check if permission allows for executing
-    #[must_use]
-    pub fn exec(&self) -> bool {
-        *self & Self::EXEC == Self::EXEC
     }
 
     /// Check if read permission should be set after a write
@@ -117,12 +108,6 @@ impl Display for Perm {
 
         if self.write() {
             write!(f, "W")?;
-        } else {
-            write!(f, "_")?;
-        }
-
-        if self.exec() {
-            write!(f, "X")?;
         } else {
             write!(f, "_")?;
         }

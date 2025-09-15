@@ -29,8 +29,6 @@ pub enum Reason {
     NotReadable,
     /// Some part of the address range was not writable during a write
     NotWritable,
-    /// Some part of the address range was not executable during a fetch
-    NotExecutable,
 }
 
 impl Reason {
@@ -38,7 +36,6 @@ impl Reason {
         match value {
             Perm::READ => Self::NotReadable,
             Perm::WRITE => Self::NotWritable,
-            Perm::EXEC => Self::NotExecutable,
             _ => unreachable!("Encountered unexpected permission"),
         }
     }
@@ -70,7 +67,6 @@ impl Display for Reason {
             Reason::NotMapped => write!(f, "Memory range is not mapped"),
             Reason::NotReadable => write!(f, "Memory range does not have read permission"),
             Reason::NotWritable => write!(f, "Memory range does not have write permission"),
-            Reason::NotExecutable => write!(f, "Memory range does not have executable permission"),
         }
     }
 }

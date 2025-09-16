@@ -1,6 +1,9 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 
+#[cfg(feature = "serde")]
+use serde::{Serialize, Deserialize};
+
 /// Range of virtual addresses
 ///
 /// These are fully ordered by their beginning address so that it is easy to keep them sorted in
@@ -8,6 +11,7 @@ use std::ops::Range;
 ///
 /// The start address is inclusive and the end address is exclusive.
 #[derive(Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AddrRange {
     /// Address of the first byte in the range
     pub start: usize,

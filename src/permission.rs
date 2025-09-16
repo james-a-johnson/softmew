@@ -1,13 +1,15 @@
 use std::fmt::Display;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 
-/// Access permissions for some amount of memory
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
+/// Access permissions for some amount of memory.
 ///
 /// Represents how a specific byte of memory may be accessed. Can be any combination of
 /// - [`Perm::NONE`]
 /// - [`Perm::READ`]
 /// - [`Perm::WRITE`]
-/// - [`Perm::EXEC`]
 /// - [`Perm::RAW`]
 ///
 /// A combination can be made by oring together any two permissions to get the union of
@@ -23,52 +25,42 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 /// permission when it is written to.
 ///
 /// When using RAW you should not use [`Perm::READ`] as well on the memory or else it will have
-/// no affect. The read permission means that it is safe to read the memory at any point during
-/// execution. So a read to that memory before it has been initialized will not cause a fault.
+/// no affect. The read permission means that it is safe to read the memory at any point. So a read
+/// to that memory before it has been initialized will not cause a fault.
 ///
 /// # NOTE
 /// Any combination of permissions is allowed. You can set memory as being write only and
-/// that memory will be write only. Any attempt to read or execute from that memory will
-/// cause a fault.
-///
-/// Additionally, execute only memory is not readable. Any attempt to read it  will cause a fault.
+/// that memory will be write only. Any attempt to read from that memory will cause a fault.
 #[repr(transparent)]
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Perm(u8);
 
 impl Perm {
-    /// Memory may not be read, written, or executed
+    /// Memory may not be read or written.
     pub const NONE: Self = Self(0);
-    /// Memory may be read
+    /// Memory may be read.
     pub const READ: Self = Self(1 << 0);
-    /// Memory may be written to
+    /// Memory may be written to.
     pub const WRITE: Self = Self(1 << 1);
-    /// Memory may be executed / fetched for execution
-    pub const EXEC: Self = Self(1 << 2);
-    /// Memory may be read after it has first been written to
+    /// Memory may be read after it has first been written to.
     ///
     /// Makes sense to set this flag for uninitialized memory.
-    pub const RAW: Self = Self(1 << 3);
+    pub const RAW: Self = Self(1 << 2);
 
-    /// Check if permission allows reading
+    /// Check if permission allows reading.
     #[must_use]
     pub fn read(&self) -> bool {
         *self & Self::READ == Self::READ
     }
 
-    /// Check if permission allows writing
+    /// Check if permission allows writing.
     #[must_use]
     pub fn write(&self) -> bool {
         *self & Self::WRITE == Self::WRITE
     }
 
-    /// Check if permission allows for executing
-    #[must_use]
-    pub fn exec(&self) -> bool {
-        *self & Self::EXEC == Self::EXEC
-    }
-
-    /// Check if read permission should be set after a write
+    /// Check if read permission should be set after a write.
     #[must_use]
     pub fn raw(&self) -> bool {
         *self & Self::RAW == Self::RAW
@@ -117,12 +109,6 @@ impl Display for Perm {
 
         if self.write() {
             write!(f, "W")?;
-        } else {
-            write!(f, "_")?;
-        }
-
-        if self.exec() {
-            write!(f, "X")?;
         } else {
             write!(f, "_")?;
         }

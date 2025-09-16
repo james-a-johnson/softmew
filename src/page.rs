@@ -13,6 +13,9 @@ use crate::permission::Perm;
 use std::fmt::{Debug, Formatter};
 use std::ops::Range;
 
+#[cfg(feature = "serde")]
+use serde::{Serialize, Deserialize};
+
 /// This will control the size of a dirty block
 ///
 /// Resetting works on blocks of memory and this controls that block size. Every time a write
@@ -68,6 +71,7 @@ pub trait Page: AsMut<[u8]> {
 ///
 /// When accessing memory with [`SnapshotPage::read`] or [`SnapshotPage::write`]
 /// the permissions for each byte that is accessed will be checked.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SnapshotPage {
     /// Linear array of bytes that contains all the data in the page.
     data: Box<[u8]>,
@@ -404,6 +408,7 @@ impl Page for SnapshotPage {
 ///
 /// This page is intended to emulate a standard page as closely as possible. It only has a single
 /// permission for all bytes in the page and does not have any extra features.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SimplePage {
     addr: usize,
     perm: Perm,
@@ -575,7 +580,7 @@ mod test {
 
     #[test]
     fn read_fail() {
-        let map = SnapshotPage::new(0x100, 0x100, Perm::EXEC);
+        let map = SnapshotPage::new(0x100, 0x100, Perm::NONE);
         let mut buffer = [0u8; 0x10];
         let res = map.read(0x110, &mut buffer);
         assert!(res.is_err());
@@ -587,7 +592,7 @@ mod test {
 
     #[test]
     fn write_fail() {
-        let mut map = SnapshotPage::new(0x100, 0x100, Perm::EXEC);
+        let mut map = SnapshotPage::new(0x100, 0x100, Perm::NONE);
         let buffer = [10u8; 0x10];
         let res = map.write(0x110, &buffer);
         assert!(res.is_err());

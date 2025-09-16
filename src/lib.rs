@@ -5,6 +5,9 @@ use crate::page::{Page, SnapshotPage};
 pub use crate::permission::Perm;
 use std::cmp::Ordering;
 
+#[cfg(feature = "serde")]
+use serde::{Serialize, Deserialize};
+
 pub mod address;
 pub mod fault;
 pub mod page;
@@ -51,6 +54,7 @@ pub mod permission;
 /// // snapshot is a snapshot of memory so it is safe to use here
 /// unsafe { memory.reset(&snapshot); }
 /// ```
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MMU<P> {
     /// List of `AddrRanges` sorted by the lowest address in the range
     ///

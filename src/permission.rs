@@ -1,6 +1,9 @@
 use std::fmt::Display;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// Access permissions for some amount of memory.
 ///
 /// Represents how a specific byte of memory may be accessed. Can be any combination of
@@ -30,6 +33,7 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 /// that memory will be write only. Any attempt to read from that memory will cause a fault.
 #[repr(transparent)]
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Perm(u8);
 
 impl Perm {

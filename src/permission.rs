@@ -47,6 +47,8 @@ impl Perm {
     ///
     /// Makes sense to set this flag for uninitialized memory.
     pub const RAW: Self = Self(1 << 2);
+    /// Memory is readable and writable.
+    pub const RW: Self = Self(Self::READ.0 | Self::WRITE.0);
 
     /// Check if permission allows reading.
     #[must_use]

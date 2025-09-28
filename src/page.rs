@@ -7,14 +7,13 @@
 //! The set of common page operations is defined by [`Page`]. The specific page implementation may
 //! offer additional functionality.
 
-use crate::address::AddrRange;
 use crate::fault::{Fault, Reason};
 use crate::permission::Perm;
 use std::fmt::{Debug, Formatter};
 use std::ops::Range;
 
 #[cfg(feature = "serde")]
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// This will control the size of a dirty block
 ///
@@ -59,6 +58,25 @@ pub trait Page: AsMut<[u8]> {
 
     /// Get the starting address of the page.
     fn start(&self) -> usize;
+
+    /// Get a slice of bytes mapped by this page.
+    ///
+    /// `addrs`: Range of addresses to get a slice of.
+    ///
+    /// # Errors
+    /// Checks to make sure that the slice has read permissions. If any of the addresses are not
+    /// mapped or don't have the read permission, then a fault is returned.
+    fn get_slice(&self, addrs: Range<usize>) -> Result<&[u8], Fault>;
+
+    /// Get a mutable slice of bytes mapped by this page.
+    ///
+    /// Using this method will update the permissions for any byte that has the RAW permission set.
+    ///
+    /// `addrs`: Range of addresses to get a slice of.
+    ///
+    /// # Errors
+    /// Returns an error if any address is not mapped or is missing the write permission.
+    fn get_slice_mut(&mut self, addrs: Range<usize>) -> Result<&mut [u8], Fault>;
 }
 
 /// Memory mapping with byte level permissions.
@@ -318,6 +336,12 @@ impl Page for SnapshotPage {
         Ok(())
     }
 
+    fn get_slice(&self, addrs: Range<usize>) -> Result<&[u8], Fault> {
+        let offset = self.check_perm(addrs, Perm::READ)?;
+        // SAFETY: check_perm will return a valid range into the data array.
+        Ok(unsafe { self.data.get_unchecked(offset) })
+    }
+
     /// Write memory with permission checks
     ///
     /// Any of the bytes that were written that have [`Perm::RAW`] set will gain the [`Perm::READ`]
@@ -362,6 +386,32 @@ impl Page for SnapshotPage {
             }
         }
         Ok(())
+    }
+
+    fn get_slice_mut(&mut self, addrs: Range<usize>) -> Result<&mut [u8], Fault> {
+        let (offset, has_raw) = self.check_perm_write(addrs, Perm::WRITE)?;
+        // SAFETY: check_perm_write will return a range that is safe to index into the data vector.
+        let accessed_data = unsafe { self.data.get_unchecked_mut(offset.clone()) };
+        // Optimize and assume that if any of the bytes have RAW set then all of them have RAW set
+        if has_raw {
+            // SAFETY: The offset range is safe for the data vector. Since the perms and data vector
+            // always have the same shape, it is safe to use it to index into the perms array.
+            let perms_to_set = unsafe { self.perms.get_unchecked_mut(offset.clone()) };
+            for p in perms_to_set {
+                *p |= Perm::READ;
+            }
+        }
+        let start_block = offset.start / PAGE_SIZE;
+        let end_block = offset.end / PAGE_SIZE;
+        for block in start_block..=end_block {
+            let idx = block / 64;
+            let bit = block % 64;
+            if self.dirty_flag[idx] & (1 << bit) == 0 {
+                self.dirty.push(block);
+                self.dirty_flag[idx] |= 1 << bit;
+            }
+        }
+        Ok(accessed_data)
     }
 
     /// Range of addresses mapped by memory
@@ -420,6 +470,33 @@ impl SimplePage {
     pub fn set_perm(&mut self, perm: Perm) {
         self.perm = perm;
     }
+
+    fn check_perm(&self, addrs: Range<usize>, perm: Perm) -> Result<Range<usize>, Fault> {
+        if addrs.start < self.addr {
+            return Err(Fault {
+                address: addrs.into(),
+                reason: Reason::NotMapped,
+            });
+        }
+        let offset_range = (addrs.start - self.addr)..(addrs.end - self.addr);
+        if offset_range.end > self.data.len() {
+            return Err(Fault {
+                address: addrs.into(),
+                reason: Reason::NotMapped,
+            });
+        }
+        // SAFETY: The perms vector is kept in sync with the data range. Above, we've checked that it
+        // is a valid range for the data vector. So we can safely use it here to index into the
+        // permissions vector.
+        if self.perm & perm == perm {
+            Ok(offset_range)
+        } else {
+            Err(Fault {
+                address: addrs.into(),
+                reason: Reason::from(perm),
+            })
+        }
+    }
 }
 
 impl AsRef<[u8]> for SimplePage {
@@ -449,27 +526,16 @@ impl Page for SimplePage {
     /// - Not mapped error if the requested address is outside the contained memory range
     /// - Fault if the memory does not have read permissions
     fn read(&self, addr: usize, buf: &mut [u8]) -> Result<(), Fault> {
-        if addr < self.addr {
-            return Err(Fault {
-                address: AddrRange::new(addr, buf.len()),
-                reason: Reason::NotMapped,
-            });
-        }
-        let offset = addr - self.addr;
-        if offset + buf.len() > self.data.len() {
-            return Err(Fault {
-                address: AddrRange::new(addr, buf.len()),
-                reason: Reason::NotMapped,
-            });
-        }
-        if !self.perm.read() {
-            return Err(Fault {
-                address: AddrRange::new(addr, buf.len()),
-                reason: Reason::NotReadable,
-            });
-        }
-        buf.copy_from_slice(&self.data[offset..][..buf.len()]);
+        let offset = self.check_perm(addr..addr + buf.len(), Perm::READ)?;
+        // SAFETY: check_perm returns a slice that is guaranteed to be valid.
+        buf.copy_from_slice(unsafe { self.data.get_unchecked(offset) });
         Ok(())
+    }
+
+    fn get_slice(&self, addrs: Range<usize>) -> Result<&[u8], Fault> {
+        let offset = self.check_perm(addrs, Perm::READ)?;
+        // SAFETY: check_perm returns a slice that is guaranteed to be valid.
+        Ok(unsafe { self.data.get_unchecked(offset) })
     }
 
     /// Write some data into the mapping.
@@ -478,27 +544,14 @@ impl Page for SimplePage {
     /// - Not mapped error if the requested address is outside the contained memory range
     /// - Fault if the memory does not have read permissions
     fn write(&mut self, addr: usize, buf: &[u8]) -> Result<(), Fault> {
-        if addr < self.addr {
-            return Err(Fault {
-                address: AddrRange::new(addr, buf.len()),
-                reason: Reason::NotMapped,
-            });
-        }
-        let offset = addr - self.addr;
-        if offset + buf.len() > self.data.len() {
-            return Err(Fault {
-                address: AddrRange::new(addr, buf.len()),
-                reason: Reason::NotMapped,
-            });
-        }
-        if !self.perm.write() {
-            return Err(Fault {
-                address: AddrRange::new(addr, buf.len()),
-                reason: Reason::NotWritable,
-            });
-        }
-        self.data[offset..][..buf.len()].copy_from_slice(buf);
+        let offset = self.check_perm(addr..addr + buf.len(), Perm::WRITE)?;
+        unsafe { self.data.get_unchecked_mut(offset) }.copy_from_slice(buf);
         Ok(())
+    }
+
+    fn get_slice_mut(&mut self, addrs: Range<usize>) -> Result<&mut [u8], Fault> {
+        let offset = self.check_perm(addrs, Perm::WRITE)?;
+        Ok(unsafe { self.data.get_unchecked_mut(offset) })
     }
 
     /// Get the range of addresses mapped by this page.
@@ -526,6 +579,7 @@ impl Page for SimplePage {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::AddrRange;
 
     #[test]
     fn reset() {

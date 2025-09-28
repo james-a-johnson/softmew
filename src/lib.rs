@@ -4,9 +4,10 @@ use crate::fault::Reason;
 use crate::page::{Page, SnapshotPage};
 pub use crate::permission::Perm;
 use std::cmp::Ordering;
+use std::ops::Range;
 
 #[cfg(feature = "serde")]
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 pub mod address;
 pub mod fault;
@@ -219,6 +220,30 @@ impl<P: Page> MMU<P> {
     #[must_use]
     pub fn gaps(&self) -> Gaps<'_, P> {
         Gaps::new(self)
+    }
+
+    /// Get the bytes backing specific addresses.
+    ///
+    /// # Errors
+    /// Returns an error if any address is not mapped or missing the read permission.
+    pub fn get_slice(&self, addrs: Range<usize>) -> Result<&[u8], Fault> {
+        let map = self.get_mapping(addrs.start).ok_or(Fault {
+            address: AddrRange::new(addrs.start, addrs.end - addrs.start),
+            reason: Reason::NotMapped,
+        })?;
+        map.get_slice(addrs)
+    }
+
+    /// Get a mutable reference to the bytes backing specific addresses.
+    ///
+    /// # Errors
+    /// Returns an error if any address is not mapped or missing the write permission.
+    pub fn get_slice_mut(&mut self, addrs: Range<usize>) -> Result<&mut [u8], Fault> {
+        let map = self.get_mapping_mut(addrs.start).ok_or(Fault {
+            address: AddrRange::new(addrs.start, addrs.end - addrs.start),
+            reason: Reason::NotMapped,
+        })?;
+        map.get_slice_mut(addrs)
     }
 }
 

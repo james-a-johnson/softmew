@@ -224,26 +224,30 @@ impl<P: Page> MMU<P> {
 
     /// Get the bytes backing specific addresses.
     ///
+    /// Uses the given permissions to check for faults on accessing the memory.
+    ///
     /// # Errors
     /// Returns an error if any address is not mapped or missing the read permission.
-    pub fn get_slice(&self, addrs: Range<usize>) -> Result<&[u8], Fault> {
+    pub fn get_slice(&self, addrs: Range<usize>, perm: Perm) -> Result<&[u8], Fault> {
         let map = self.get_mapping(addrs.start).ok_or(Fault {
             address: AddrRange::new(addrs.start, addrs.end - addrs.start),
             reason: Reason::NotMapped,
         })?;
-        map.get_slice(addrs)
+        map.get_slice(addrs, perm)
     }
 
     /// Get a mutable reference to the bytes backing specific addresses.
     ///
+    /// Uses the given permissions to check for faults on accessing the memory.
+    ///
     /// # Errors
     /// Returns an error if any address is not mapped or missing the write permission.
-    pub fn get_slice_mut(&mut self, addrs: Range<usize>) -> Result<&mut [u8], Fault> {
+    pub fn get_slice_mut(&mut self, addrs: Range<usize>, perm: Perm) -> Result<&mut [u8], Fault> {
         let map = self.get_mapping_mut(addrs.start).ok_or(Fault {
             address: AddrRange::new(addrs.start, addrs.end - addrs.start),
             reason: Reason::NotMapped,
         })?;
-        map.get_slice_mut(addrs)
+        map.get_slice_mut(addrs, perm)
     }
 }
 

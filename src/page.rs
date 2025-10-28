@@ -64,9 +64,9 @@ pub trait Page: AsMut<[u8]> {
     /// `addrs`: Range of addresses to get a slice of.
     ///
     /// # Errors
-    /// Checks to make sure that the slice has read permissions. If any of the addresses are not
-    /// mapped or don't have the read permission, then a fault is returned.
-    fn get_slice(&self, addrs: Range<usize>) -> Result<&[u8], Fault>;
+    /// Checks to make sure that the slice has the givne permissions. If any of the addresses are not
+    /// mapped or don't have the required permission, then a fault is returned.
+    fn get_slice(&self, addrs: Range<usize>, perm: Perm) -> Result<&[u8], Fault>;
 
     /// Get a mutable slice of bytes mapped by this page.
     ///
@@ -75,8 +75,8 @@ pub trait Page: AsMut<[u8]> {
     /// `addrs`: Range of addresses to get a slice of.
     ///
     /// # Errors
-    /// Returns an error if any address is not mapped or is missing the write permission.
-    fn get_slice_mut(&mut self, addrs: Range<usize>) -> Result<&mut [u8], Fault>;
+    /// Returns an error if any address is not mapped or is missing the required permission.
+    fn get_slice_mut(&mut self, addrs: Range<usize>, perm: Perm) -> Result<&mut [u8], Fault>;
 }
 
 /// Memory mapping with byte level permissions.
@@ -336,8 +336,8 @@ impl Page for SnapshotPage {
         Ok(())
     }
 
-    fn get_slice(&self, addrs: Range<usize>) -> Result<&[u8], Fault> {
-        let offset = self.check_perm(addrs, Perm::READ)?;
+    fn get_slice(&self, addrs: Range<usize>, perm: Perm) -> Result<&[u8], Fault> {
+        let offset = self.check_perm(addrs, perm)?;
         // SAFETY: check_perm will return a valid range into the data array.
         Ok(unsafe { self.data.get_unchecked(offset) })
     }
@@ -388,8 +388,8 @@ impl Page for SnapshotPage {
         Ok(())
     }
 
-    fn get_slice_mut(&mut self, addrs: Range<usize>) -> Result<&mut [u8], Fault> {
-        let (offset, has_raw) = self.check_perm_write(addrs, Perm::WRITE)?;
+    fn get_slice_mut(&mut self, addrs: Range<usize>, perm: Perm) -> Result<&mut [u8], Fault> {
+        let (offset, has_raw) = self.check_perm_write(addrs, perm)?;
         // SAFETY: check_perm_write will return a range that is safe to index into the data vector.
         let accessed_data = unsafe { self.data.get_unchecked_mut(offset.clone()) };
         // Optimize and assume that if any of the bytes have RAW set then all of them have RAW set
@@ -532,8 +532,8 @@ impl Page for SimplePage {
         Ok(())
     }
 
-    fn get_slice(&self, addrs: Range<usize>) -> Result<&[u8], Fault> {
-        let offset = self.check_perm(addrs, Perm::READ)?;
+    fn get_slice(&self, addrs: Range<usize>, perm: Perm) -> Result<&[u8], Fault> {
+        let offset = self.check_perm(addrs, perm)?;
         // SAFETY: check_perm returns a slice that is guaranteed to be valid.
         Ok(unsafe { self.data.get_unchecked(offset) })
     }
@@ -549,8 +549,8 @@ impl Page for SimplePage {
         Ok(())
     }
 
-    fn get_slice_mut(&mut self, addrs: Range<usize>) -> Result<&mut [u8], Fault> {
-        let offset = self.check_perm(addrs, Perm::WRITE)?;
+    fn get_slice_mut(&mut self, addrs: Range<usize>, perm: Perm) -> Result<&mut [u8], Fault> {
+        let offset = self.check_perm(addrs, perm)?;
         Ok(unsafe { self.data.get_unchecked_mut(offset) })
     }
 
